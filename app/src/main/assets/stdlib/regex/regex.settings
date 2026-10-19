@@ -1,0 +1,2 @@
+# core.regex —— 正则内建占位（List/Optional 依赖 core.collection）
+mount core.collection

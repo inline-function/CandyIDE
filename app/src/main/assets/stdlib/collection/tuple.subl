@@ -1,0 +1,64 @@
+// core.collection.tuple —— Tuple 类型族（EmptyTuple/SingleTuple/(T,U)/(T,U,V)/…）
+// 依赖：无（emptyTuple/singleTuple 为编译期内建：空元组 [] / 单元组 [x]）。
+// 元组字面量 (a, b) 的运行时表示即 JS 数组；本类型族为元组提供统一的方法接口
+// （size/isEmpty 按元目数分派，impl 目标即元组形状）。
+
+class Tuple {
+    fun size(): Nat
+    fun isEmpty(): Bool
+}
+
+impl Tuple for EmptyTuple {
+    fun size(): Nat = 0
+    fun isEmpty(): Bool = true
+}
+
+impl Tuple for SingleTuple[a] {
+    fun size(): Nat = 1
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b) {
+    fun size(): Nat = 2
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c) {
+    fun size(): Nat = 3
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d) {
+    fun size(): Nat = 4
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d, e) {
+    fun size(): Nat = 5
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d, e, f) {
+    fun size(): Nat = 6
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d, e, f, g) {
+    fun size(): Nat = 7
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d, e, f, g, h) {
+    fun size(): Nat = 8
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d, e, f, g, h, i) {
+    fun size(): Nat = 9
+    fun isEmpty(): Bool = false
+}
+
+impl Tuple for (a, b, c, d, e, f, g, h, i, j) {
+    fun size(): Nat = 10
+    fun isEmpty(): Bool = false
+}

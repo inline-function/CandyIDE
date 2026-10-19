@@ -1,0 +1,28 @@
+// core.json —— JSON 内建声明（v2.0）
+// 依赖：core.collection（Optional/List）。
+// Json 是内建类型（JSON 值的不透明载体）；全部内建空安全——取值失败返回 None，
+// 不抛异常（决策 82）：jsonParse 坏 JSON 返回 None。
+
+// ---------- 解析 ----------
+@root fun jsonParse(s: Str): Optional[Json]
+
+// ---------- 取值 ----------
+// 按 key 取字段（对象）；非对象或无该 key 返回 None。
+@root fun jsonGet(j: Json, k: Str): Optional[Json]
+// 按下标取元素（数组）；越界或非数组返回 None。
+@root fun jsonAt(j: Json, i: Nat): Optional[Json]
+// 数组长度；非数组返回 None。
+@root fun jsonLen(j: Json): Optional[Nat]
+
+// ---------- 类型化解包 ----------
+@root fun jsonStr(j: Json): Optional[Str]
+@root fun jsonNum(j: Json): Optional[Rat]
+@root fun jsonBool(j: Json): Optional[Bool]
+// null 值判定（区分「字段不存在」与「字段是 null」）。
+@root fun jsonIsNull(j: Json): Bool
+@root fun jsonIsArr(j: Json): Bool
+
+// ---------- 序列化 ----------
+@root fun jsonToStr(j: Json): Str
+// 数组转 List[Json]（便于容器工具链消费）。
+@root fun jsonToList(j: Json): List[Json]

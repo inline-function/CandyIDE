@@ -1,0 +1,16 @@
+// core.regex —— 正则匹配内建（未实现占位）
+// 依赖：core.collection（List/Optional 返回类型）。
+// 现状：正则内建尚未落地（无 codegen 特判、无宿主实现），签名先行占位。
+// 落地后改 @root + codegen 特判（JS RegExp）。
+
+// 全量匹配判定。
+fun regexMatch(s: Str, pattern: Str): Bool = panic()
+
+// 查找首个匹配的起止下标：未命中返回 None。
+fun regexFind(s: Str, pattern: Str): Optional[(Nat, Nat)] = panic()
+
+// 分割（正则分隔符）。
+fun regexSplit(s: Str, pattern: Str): List[Str] = panic()
+
+// 全部替换。
+fun regexReplace(s: Str, pattern: Str, repl: Str): Str = panic()

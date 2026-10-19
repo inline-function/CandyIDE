@@ -1,0 +1,91 @@
+// core.collection.set —— Set[T]（去重集合：SetNil() / SetCons(T, Set[T])）
+// 依赖：本模块（typeclass 的类型类、list 的 List）；无跨包依赖。
+// Set 是结构枚举：contains 判重，add/remove/union/intersect 保持去重不变量。
+
+enum Set[T] {
+    SetNil()
+    SetCons(T, Set[T])
+}
+
+impl Functor for Set[a] {
+    fun map[A, B](fa: Set[A], f: (A) => B): Set[B] = when(fa) {
+        SetNil => SetNil()
+        is SetCons(h, t) => add(t.map(f), f(h))
+    }
+}
+
+impl Foldable for Set[a] {
+    fun fold[A, R](fa: Set[A], init: R, f: (R, A) => R): R = when(fa) {
+        SetNil => init
+        is SetCons(h, t) => fold(t, f(init, h), f)
+    }
+}
+
+// ---------- 构造 ----------
+fun setEmpty[T](): Set[T] = SetNil()
+
+// setOf 的变长实参（@list）在 codegen 特判为 SetCons 链。
+fun setOf[T](@list items: T): Set[T] = SetNil()
+
+// ---------- 增删 ----------
+// 加入元素：已存在则保持不变（判重不变量）。
+fun add[T](s: Set[T], x: T): Set[T] = if (contains(s, x)) { s } else { SetCons(x, s) }
+
+// 移除元素：不存在则保持不变。
+fun remove[T](s: Set[T], x: T): Set[T] = when(s) {
+    SetNil => SetNil()
+    is SetCons(h, t) => if (h == x) { t } else { SetCons(h, remove(t, x)) }
+}
+
+// ---------- 观察 ----------
+fun size[T](s: Set[T]): Nat = when(s) {
+    SetNil => 0
+    is SetCons(_, t) => size(t) + 1
+}
+
+fun isEmpty[T](s: Set[T]): Bool = when(s) {
+    SetNil => true
+    is SetCons(_, _) => false
+}
+
+fun contains[T](s: Set[T], x: T): Bool = when(s) {
+    SetNil => false
+    is SetCons(h, t) => if (h == x) { true } else { contains(t, x) }
+}
+
+fun count[T](s: Set[T], p: (T) => Bool): Nat = s.fold(0) { acc, x =>
+    if (p(x)) { acc + 1 } else { acc }
+}
+
+@impure
+fun forEach[T](s: Set[T], f: @impure (T) => Null): Null = when(s) {
+    SetNil => null
+    is SetCons(h, t) => { f(h); forEach(t, f) }
+}
+
+// ---------- 集合运算 ----------
+fun union[T](s1: Set[T], s2: Set[T]): Set[T] = when(s1) {
+    SetNil => s2
+    is SetCons(h, t) => if (contains(s2, h)) { union(t, s2) } else { SetCons(h, union(t, s2)) }
+}
+
+fun intersect[T](s1: Set[T], s2: Set[T]): Set[T] = when(s1) {
+    SetNil => SetNil()
+    is SetCons(h, t) => if (contains(s2, h)) { SetCons(h, intersect(t, s2)) } else { intersect(t, s2) }
+}
+
+fun filter[T](s: Set[T], p: (T) => Bool): Set[T] = when(s) {
+    SetNil => SetNil()
+    is SetCons(h, t) => if (p(h)) { SetCons(h, filter(t, p)) } else { filter(t, p) }
+}
+
+fun flatMap[T, U](s: Set[T], f: (T) => Set[U]): Set[U] = when(s) {
+    SetNil => SetNil()
+    is SetCons(h, t) => union(f(h), flatMap(t, f))
+}
+
+// ---------- 转换 ----------
+fun toList[T](s: Set[T]): List[T] = when(s) {
+    SetNil => Nil()
+    is SetCons(h, t) => Cons(h, toList(t))
+}

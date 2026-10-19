@@ -1,0 +1,30 @@
+// core.collection.typeclass —— 类型类：Functor / Foldable / Monad
+//
+// 类型类用 class 声明（成员无体 = 抽象签名）；impl <类型类> for <实例类型> 提供实例。
+// 方法式成员：第一形参 fa: F[A] 即接收者——方法糖 xs.map(f) 与自由式 map(xs, f) 皆路由到同一实例。
+// HKT 形态：零实参小写名是隐式类型变量（impl Functor for List[a] 的 a），
+// 二阶类型用 kind 应用槽 _ （如 impl Functor for Result[_, E]）。
+
+// ---------- Functor：可映射容器 ----------
+// 依据：map 保持容器形状、只变换元素（函子定律：identity 与组合保持）。
+// List/Optional/Set 有实例；Result 是二阶类型（T*E 双参数）——成功路径映射走 mapOk
+// （见 result.subl，Functor/Monad 语义等价物）。
+class Functor[F[_]] {
+    fun map[A, B](fa: F[A], f: (A) => B): F[B]
+}
+
+// ---------- Foldable：可折叠容器 ----------
+// 依据：fold 左结合累积——init 为零元、f 为 (R, A) => R 步进（累积在前）。
+// 容器通用工具（size/isEmpty/contains/count/any/all/find/forEach）按各容器
+// 重载为同名自由式（接收者路由），不走类型类约束签名。
+class Foldable[F[_]] {
+    fun fold[A, R](fa: F[A], init: R, f: (R, A) => R): R
+}
+
+// ---------- Monad：Functor 之上的单子 ----------
+// 依据：pure 把单值注入容器、flatMap 链式展平（结合律 + 左/右单位元）。
+// List 的 flatMap 即列表连接映射；Optional 的 flatMap 即空值短路。
+class Monad[F[_]] : Functor[F] {
+    fun pure[A](x: A): F[A]
+    fun flatMap[A, B](fa: F[A], f: (A) => F[B]): F[B]
+}

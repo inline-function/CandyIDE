@@ -1,0 +1,18 @@
+// core.async.channel —— Channel 有缓冲通道
+// 依赖：core.collection（channelFromList/channelDrain 的 List）。
+// 通道创建语法 Channel[T](n)：构造带 n 容量的有缓冲通道（内建类型 Channel）。
+// 对象方法（运行时 class 注入）：
+//   send(v)   发送（缓冲满时挂起）
+//   receive() 接收（缓冲空时挂起；本地未关闭通道 CH-5 智能转换返回 T 解包值）
+//   close()   关闭
+// FIFO 保序：先发送先接收。
+@impure @async
+@root fun channelFromList[T](ch: Channel[T], xs: List[T]): Null
+@impure @async
+@root fun channelDrain[T](ch: Channel[T]): List[T]
+// 管道：src 收完转投 dst。
+@impure @async
+@root fun channelPipe[T](src: Channel[T], dst: Channel[T]): Null
+// 批量发送。
+@impure @async
+@root fun sendAll[T](ch: Channel[T], xs: List[T]): Null

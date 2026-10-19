@@ -1,0 +1,8 @@
+// core.async.task —— Task 轻量任务
+// 依赖：无（Task 是内建语法：Task { body } 块表达式，创建未启动任务）。
+// Task 块体天然 async；对象方法（运行时注入）：
+//   start()    启动任务（异步执行 body）
+//   join()     等待任务结束并取返回值（未 start 即 join 报 E-NOT-STARTED）
+//   isAlive()  是否仍在运行
+// join 在同步上下文调用报 E-NEED-ASYNC（Task 体内天然 async 合法）。
+// 任务创建即普通表达式（无内建函数）：本文件仅登记语法文档，无声明。

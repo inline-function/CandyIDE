@@ -1,0 +1,43 @@
+// core.math —— 自然数算术工具 + Math 内建声明
+// 依赖：无（本包是仓库依赖图的叶子；core.logic 挂载本包）。
+// Math 系（mathMin/mathMax/…）是 @root 内建：签名即文档，调用点由 codegen 特判翻译为
+// JS Math.* 原生（脚本模式由宿主函数表提供）。
+
+// ---------- Math 内建（Rat 域） ----------
+// 依据：JS Math 原生语义（IEEE double via JS Number）。
+@root fun mathMin(a: Rat, b: Rat): Rat
+@root fun mathMax(a: Rat, b: Rat): Rat
+// 区间钳制：x 超出 [lo, hi] 时取边界。
+@root fun mathClamp(x: Rat, lo: Rat, hi: Rat): Rat
+// 四舍五入（就近偶数规则同 JS Math.round：.5 向 +Infinity 取整）。
+@root fun mathRound(x: Rat): Rat
+// 三角函数（弧度制）。
+@root fun mathSin(x: Rat): Rat
+@root fun mathCos(x: Rat): Rat
+@root fun mathTan(x: Rat): Rat
+
+// ---------- 实数平方根 ----------
+// 平方根：实数参数 x 的二分之一次方（x 的 1/2 次幂），由内建 pow 定义。
+fun sqrt(x: Rat): Rat = pow(x, 0.5)
+
+// ---------- Nat 算术工具 ----------
+// 欧几里得算法：gcd(48, 18) = 6。
+fun gcd(a: Nat, b: Nat): Nat =
+    if (b == 0) { a } else { unchecked var r = gcd(b, a % b); r }
+
+// 最小公倍数：lcm(a, b) = a * (b / gcd(a, b))。
+fun lcm(a: Nat, b: Nat): Nat =
+    if (b == 0) { 0 } else { unchecked var r = gcd(a, b); a * (b / r) }
+
+// 奇偶判定：n % 2 的余数比较（Nat 表数范围内）。
+fun isEven(n: Nat): Bool = n % 2 == 0
+
+fun isOdd(n: Nat): Bool = n % 2 != 0
+
+// 平方与立方（Nat 域）。
+fun sq(n: Nat): Nat = n * n
+
+fun cube(n: Nat): Nat = n * n * n
+
+// 等差求和：summation(1, 100) = 5050（右开区间，递推自 range + sum）。
+fun summation(a: Nat, b: Nat): Nat = sum(range(a, b))

@@ -1,0 +1,1 @@
+# core.collection —— 容器统一模块（List/Optional/Result/Set/Map/Tuple/Typeclass 同模块互见，无跨包依赖）

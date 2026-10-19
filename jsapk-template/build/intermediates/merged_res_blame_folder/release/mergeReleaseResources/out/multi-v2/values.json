@@ -1,0 +1,38 @@
+{
+    "logs": [
+        {
+            "outputFile": "candy.jsapk.runtime.jsapk-template-mergeReleaseResources-2:/values/values.xml",
+            "map": [
+                {
+                    "source": "F:\\KotlinProject\\CandyIDE\\jsapk-template\\src\\main\\res\\values\\themes.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "4",
+                        "endColumns": "12",
+                        "endOffsets": "203"
+                    },
+                    "to": {
+                        "startLines": "3",
+                        "startColumns": "4",
+                        "startOffsets": "107",
+                        "endLines": "5",
+                        "endColumns": "12",
+                        "endOffsets": "255"
+                    }
+                },
+                {
+                    "source": "F:\\KotlinProject\\CandyIDE\\jsapk-template\\src\\main\\res\\values\\strings.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "51",
+                        "endOffsets": "102"
+                    }
+                }
+            ]
+        }
+    ]
+}

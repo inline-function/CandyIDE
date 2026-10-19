@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 糖果柄 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50.5,64 h7 a4.5,4.5 0 0 1 4.5,4.5 v17.5 a4.5,4.5 0 0 1 -4.5,4.5 h-7 a4.5,4.5 0 0 1 -4.5,-4.5 v-17.5 a4.5,4.5 0 0 1 4.5,-4.5 z" />
+    <!-- 糖果头 -->
+    <path
+        android:fillColor="#FFFF5C8A"
+        android:pathData="M54,22 m-20,0 a20,20 0 1 0 40,0 a20,20 0 1 0 -40,0 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30 m-12,0 a12,12 0 1 0 24,0 a12,12 0 1 0 -24,0 z" />
+    <path
+        android:fillColor="#FFFF5C8A"
+        android:pathData="M54,38 m-5,0 a5,5 0 1 0 10,0 a5,5 0 1 0 -10,0 z" />
+</vector>

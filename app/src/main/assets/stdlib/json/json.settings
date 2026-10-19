@@ -1,0 +1,2 @@
+# core.json —— JSON 内建声明（Optional/List 依赖 core.collection）
+mount core.collection

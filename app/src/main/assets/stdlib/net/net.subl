@@ -1,0 +1,19 @@
+// core.net —— 网络内建（未实现占位）
+// 依赖：core.collection（Result/Optional 返回类型）。
+// 现状：HTTP/套接字内建尚未落地（无 codegen 特判、无宿主实现）。
+// 签名先行登记为 panic() 占位——调用即抛异常，提醒能力边界（与 stdlib 同套路：
+// 见 show/stdlib/math.subl 的 sqrt 占位）。落地后改 @root + codegen 特判。
+
+// ---------- HTTP ----------
+// GET 请求：响应体放进 Ok；网络错误返回 Err(msg)。
+@impure @async
+fun httpGet(url: Str): Result[Str, Str] = panic()
+
+// POST 请求：带请求体。
+@impure @async
+fun httpPost(url: Str, body: Str): Result[Str, Str] = panic()
+
+// ---------- 套接字 ----------
+// TCP 连接：失败返回 Err(msg)。
+@impure @async
+fun socketConnect(host: Str, port: Nat): Result[Null, Str] = panic()

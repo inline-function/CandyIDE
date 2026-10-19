@@ -1,0 +1,2 @@
+# core.real —— Rat 浮点内建声明（依赖 core.collection 的 Optional 类型）
+mount core.collection

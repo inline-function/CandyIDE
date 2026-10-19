@@ -1,0 +1,27 @@
+// core.real —— Rat 浮点（IEEE double via JS Number）内建声明 + 转换工具
+// 依赖：core.collection（Optional）。
+// 类型决策（决策 86 候选 A）：Rat 落到 JS Number；本包声明 Rat 域的内建签名，
+// 用户模块经隐式挂载即可裸名调用（toRat/abs/sqrt…）。
+
+// ---------- 构造与转换 ----------
+// 任意数值（Nat/Int/Rat）转 Rat；类型上不限定实参（文档记限制：预期 Nat/Int 使用）。
+@root fun toRat[T](n: T): Rat
+// Rat 转 Real（实数层；当前与 Rat 同表示）。
+@root fun toReal[T](n: T): Real
+// 字符串解析为 Rat：失败返回 None（如 "x" → None）。
+@root fun parseRat(s: Str): Optional[Rat]
+
+// ---------- 绝对值与取整 ----------
+@root fun abs(x: Rat): Rat
+@root fun floor(x: Rat): Rat
+@root fun ceil(x: Rat): Rat
+// 幂：pow(x, y) = x 的 y 次幂。
+@root fun pow(x: Rat, y: Rat): Rat
+// 注：sqrt 仅脚本模式可用（宿主函数表注入 @host 声明；编译模式尚未落地 JS 特判）。
+
+// ---------- 解析兜底 ----------
+// 字符串解析为 Rat 的默认值版本：失败回退 fallback（ratOr("2.5", 0.0) = 2.5）。
+fun ratOr(s: Str, fallback: Rat): Rat = when(parseRat(s)) {
+    is Some(r) => r
+    None => fallback
+}

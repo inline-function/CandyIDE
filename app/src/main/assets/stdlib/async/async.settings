@@ -1,0 +1,2 @@
+# core.async —— 异步内建运行时层（channelFromList/channelDrain 返回 List，依赖 core.collection）
+mount core.collection

@@ -1,0 +1,12 @@
+// core.classic —— 经典逻辑定理（排中律等）
+// 依赖：core.logic——经典定理的后件常与直觉定理联合命中（∴ 搜索沿挂载链展开）。
+// @classic：本文件任一声明标注 @classic 即挂载经典逻辑（if[p] 排中律前置可用）。
+@classic
+@theorem
+fun tertiumNonDatur[p]: Null <p ∨ ¬p>
+// 双否消去：经典逻辑特有（直觉主义只有 ¬¬p -> p 的逆方向）。
+@theorem
+fun doubleNegation[p]: Null <¬¬p -> p>
+// 逆否命题：蕴含的镜像。
+@theorem
+fun contraposition[p, q]: Null <(p -> q) -> (¬q -> ¬p)>

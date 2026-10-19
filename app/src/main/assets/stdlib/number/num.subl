@@ -1,0 +1,11 @@
+// core.number —— 数值类型类 Num
+//
+// 全局类型推导（idea doc/全局类型推导.md §六）的泛型化锚点：脚本模式下函数参数仅有算术使用点
+// （n + 1、n <= 1 …）而无构造点锁定具体类型时，泛型化为 [T: Num]。
+//
+// Num 是**标记类型类**（无成员）：数值性由类型系统内建层级（Nat/Int/Rat 一族，typeLooseEq 宽松等价）
+// 判定，故这里只给最宽的 Rat 一个实例——数值族互相宽松匹配，非数值（Str/Bool/结构体）不命中。
+// 用法：fun f[T: Num](n: T): T = n   →  f(1)、f(1.5) 合法，f(true) 报 E-NO-INSTANCE。
+class Num { }
+
+impl Num for Rat { }

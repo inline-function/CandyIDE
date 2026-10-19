@@ -1,0 +1,35 @@
+// core.string —— 字符串内建声明（P1 + v2.0 补全）
+// 依赖：core.collection（List/Optional）。
+// 全部 @root：调用点由 codegen 特判翻译为 JS 原生（脚本模式由宿主函数表提供）。
+
+// ---------- 拼接与长度 ----------
+// 拼接：concat("foo", "bar") = "foobar"。
+@root fun concat(a: Str, b: Str): Str
+// 长度（Nat 计数）。
+@root fun length(s: Str): Nat
+// 取字符：charAt("hello", 1) = "e"。
+@root fun charAt(s: Str, i: Nat): Str
+// 子串：substring(s, a, b) 取 [a, b) 段。
+@root fun substring(s: Str, a: Nat, b: Nat): Str
+// 字典序比较：<0 / =0 / >0（Str 的 Ord 基座）。
+@root fun strCmp(a: Str, b: Str): Int
+
+// ---------- 通用化 ----------
+// 任意值转字符串（插值段恒包 toStr）。
+@root fun toStr[T](n: T): Str
+// 字符串解析为 Nat：失败返回 None。
+@root fun parseNat(s: Str): Optional[Nat]
+
+// ---------- v2.0 补全：字符串扩展 ----------
+@root fun strUpper(s: Str): Str
+@root fun strLower(s: Str): Str
+@root fun strTrim(s: Str): Str
+// 前缀/后缀判定。
+@root fun startsWith(s: Str, p: Str): Bool
+@root fun endsWith(s: Str, p: Str): Bool
+// 替换：strReplace(s, a, b) 把 a 全部换成 b。
+@root fun strReplace(s: Str, a: Str, b: Str): Str
+// 分割：strSplit("a,b,c", ",") = ["a", "b", "c"]（返回数组化 List）。
+@root fun strSplit(s: Str, sep: Str): List[Str]
+// 查找子串位置：未找到返回 None。
+@root fun strIndexOf(s: Str, p: Str): Optional[Nat]

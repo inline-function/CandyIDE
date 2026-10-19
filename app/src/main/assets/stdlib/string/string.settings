@@ -1,0 +1,2 @@
+# core.string —— 字符串内建声明（strSplit 返回 List[Str]，依赖 core.collection）
+mount core.collection

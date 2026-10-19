@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="F:\KotlinProject\CandyIDE\jsapk-template"
+    name=":jsapk-template"
+    type="APP"
+    maven="CandyIDE:jsapk-template:unspecified"
+    agpVersion="8.7.3"
+    buildFolder="build"
+    bootClassPath="F:\AndroidSDK\platforms\android-35\android.jar;F:\AndroidSDK\build-tools\34.0.0\core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-35"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

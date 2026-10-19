@@ -1,0 +1,4 @@
+candy.jsapk.runtime:style/Theme.JsApk = 0x7f030000
+candy.jsapk.runtime:mipmap/ic_launcher_round = 0x7f010001
+candy.jsapk.runtime:string/app_name = 0x7f020000
+candy.jsapk.runtime:mipmap/ic_launcher = 0x7f010000

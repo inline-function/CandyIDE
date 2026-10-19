@@ -1,0 +1,17 @@
+// core.async.flow —— Flow 冷流
+// 依赖：无（Flow 体为 async 生成器，收集端由本文件内建消费）。
+// 冷流创建语法 Flow { emit(v); … }：collect 时才执行 body（惰性生成器）。
+// 对象方法（运行时 class 注入）：
+//   collect(f)  消费每个发射值（f 为消费者回调）
+//   map(f)      派生冷流（变换发射值，不立即执行）
+//   emit(v)     仅 Flow 体内合法（发送数据，codegen 翻译为 yield）
+
+// 收集为列表（发送序保持）。
+@impure @async
+@root fun collectToList[T](fl: Flow[T]): List[T]
+// 计数发射值个数。
+@impure @async
+@root fun collectCount[T](fl: Flow[T]): Nat
+// 谓词全称判定（首个 false 即短路返回 false）。
+@impure @async
+@root fun collectAll[T](fl: Flow[T], p: (T) => Bool): Bool

@@ -1,0 +1,14 @@
+// core.encoding —— 编码内建（未实现占位）
+// 依赖：无。
+// 现状：Base64/十六进制内建尚未落地（无 codegen 特判、无宿主实现），签名先行占位。
+// 落地后改 @root + codegen 特判（JS Buffer）。
+
+// ---------- Base64 ----------
+fun base64Encode(s: Str): Str = panic()
+
+fun base64Decode(s: Str): Str = panic()
+
+// ---------- 十六进制 ----------
+fun hexEncode(s: Str): Str = panic()
+
+fun hexDecode(s: Str): Str = panic()

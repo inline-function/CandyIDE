@@ -1,0 +1,53 @@
+// core.collection.result —— Result[T, E]（错误处理容器：Ok(v) / Err(e)）
+// 依赖：本模块（list 的 List）；无跨包依赖。
+// Result 是二阶类型（T*E 双参数），Functor/Foldable 的 F[_] 一阶 kind 无法直接套用——
+// 成功路径映射走 mapErr 的姐妹函数 mapOk / flatMapOk（Functor/Monad 语义等价物）。
+// P5（决策 81）：IO 失败可携带错误信息——readFile/writeFile/readLine 返回本容器。
+
+enum Result[T, E] {
+    Ok(T)
+    Err(E)
+}
+
+// ---------- 判定 ----------
+fun isOk[T, E](r: Result[T, E]): Bool = when(r) {
+    is Ok(_) => true
+    is Err(_) => false
+}
+
+fun isErr[T, E](r: Result[T, E]): Bool = when(r) {
+    is Ok(_) => false
+    is Err(_) => true
+}
+
+// ---------- 取值 ----------
+// 解包兜底：Err 回退默认值（成功路径透传）。
+fun unwrapOr[T, E](r: Result[T, E], d: T): T = when(r) {
+    is Ok(v) => v
+    is Err(_) => d
+}
+
+// ---------- 成功路径映射（Functor/Monad 等价物） ----------
+// mapOk：只变换 Ok 的内容（U 由 lambda 返回类型反推）。
+fun mapOk[T, E, U](r: Result[T, E], f: (T) => U): Result[U, E] = when(r) {
+    is Ok(v) => Ok(f(v))
+    is Err(e) => Err(e)
+}
+
+// mapErr：只变换 Err 的内容（错误信息映射）。
+fun mapErr[T, E, F](r: Result[T, E], f: (E) => F): Result[T, F] = when(r) {
+    is Ok(v) => Ok(v)
+    is Err(e) => Err(f(e))
+}
+
+// flatMapOk：成功路径链式组合（Err 短路透传）。
+fun flatMapOk[T, E, U](r: Result[T, E], f: (T) => Result[U, E]): Result[U, E] = when(r) {
+    is Ok(v) => f(v)
+    is Err(e) => Err(e)
+}
+
+// ---------- 转换 ----------
+fun toList[T, E](r: Result[T, E]): List[T] = when(r) {
+    is Ok(v) => Cons(v, Nil())
+    is Err(_) => Nil()
+}

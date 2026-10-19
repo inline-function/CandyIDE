@@ -1,0 +1,234 @@
+// core.collection.list —— 链表 List（Functor/Foldable/Monad 实例 + 自由式工具）
+// 依赖：本模块（typeclass 的类型类、optional 的 Optional）；无跨包依赖。
+// List 同时是脚本模式与编译模式的容器基底——脚本模式表示为数组值（ListV），
+// 编译模式按枚举名 List 数组化（Nil=[] / Cons(h, t)=[h, ...t]，codegen 特判）。
+
+enum List[T] {
+    Nil()
+    Cons(T, List[T])
+}
+
+impl Functor for List[a] {
+    fun map[A, B](fa: List[A], f: (A) => B): List[B] = when(fa) {
+        Nil => Nil()
+        is Cons(h, t) => Cons(f(h), t.map(f))
+    }
+}
+
+impl Foldable for List[a] {
+    fun fold[A, R](fa: List[A], init: R, f: (R, A) => R): R = when(fa) {
+        Nil => init
+        is Cons(h, t) => fold(t, f(init, h), f)
+    }
+}
+
+impl Monad for List[a] {
+    fun pure[A](x: A): List[A] = Cons(x, Nil())
+
+    fun flatMap[A, B](fa: List[A], f: (A) => List[B]): List[B] = when(fa) {
+        Nil => Nil()
+        is Cons(h, t) => append(f(h), flatMap(t, f))
+    }
+}
+
+// ---------- 构造 ----------
+// 空列表。listOf 的变长实参（@list）在 codegen 特判为 JS 数组字面量。
+fun emptyList[T](): List[T] = Nil()
+
+fun cons[T](x: T, xs: List[T]): List[T] = Cons(x, xs)
+
+fun listOf[T](@list items: T): List[T] = items
+
+// 区间构造：range(1, 6) = [1, 2, 3, 4, 5]（右开区间）。
+fun range(a: Nat, b: Nat): List[Nat]
+{
+    if (a < b) {
+        unchecked var rest = range(a + 1, b)
+        return Cons(a, rest)
+    }
+    return Nil()
+}
+
+// ---------- 观察 ----------
+fun size[T](xs: List[T]): Nat = when(xs) {
+    Nil => 0
+    is Cons(_, t) => size(t) + 1
+}
+
+fun isEmpty[T](xs: List[T]): Bool = when(xs) {
+    Nil => true
+    is Cons(_, _) => false
+}
+
+fun head[T](xs: List[T]): Optional[T] = when(xs) {
+    Nil => None()
+    is Cons(h, _) => Some(h)
+}
+
+fun last[T](xs: List[T]): Optional[T] = when(xs) {
+    Nil => None()
+    is Cons(h, Nil) => Some(h)
+    is Cons(_, t) => last(t)
+}
+
+fun elementAt[T](xs: List[T], i: Nat): Optional[T] = when(xs) {
+    Nil => None()
+    is Cons(h, t) => if (i == 0) { Some(h) } else { elementAt(t, i - 1) }
+}
+
+// 下标取值：前置条件由调用方证明（i 在范围内）；越界位置理论不可达，panic 兜底。
+fun get[T](xs: List[T], i: Nat)<i < size(xs)>: T = when(elementAt(xs, i)) {
+    is Some(v) => v
+    None => panic()
+}
+
+// 首元素兜底：空列表回退默认值。
+fun firstOr[T](xs: List[T], d: T): T = getOrElse(head(xs), d)
+
+fun contains[T](xs: List[T], x: T): Bool = when(xs) {
+    Nil => false
+    is Cons(h, t) => if (h == x) { true } else { contains(t, x) }
+}
+
+fun indexOf[T](xs: List[T], x: T): Optional[Nat] = when(xs) {
+    Nil => None()
+    is Cons(h, t) =>
+        if (h == x) { Some(0) }
+        else { when(indexOf(t, x)) {
+            is Some(n) => Some(n + 1)
+            None => None()
+        } }
+}
+
+fun count[T](xs: List[T], p: (T) => Bool): Nat = xs.fold(0) { acc, x =>
+    if (p(x)) { acc + 1 } else { acc }
+}
+
+fun any[T](xs: List[T], p: (T) => Bool): Bool = xs.fold(false) { acc, x =>
+    acc || p(x)
+}
+
+fun all[T](xs: List[T], p: (T) => Bool): Bool = xs.fold(true) { acc, x =>
+    acc && p(x)
+}
+
+fun find[T](xs: List[T], p: (T) => Bool): Optional[T] = when(xs) {
+    Nil => None()
+    is Cons(h, t) => if (p(h)) { Some(h) } else { find(t, p) }
+}
+
+@impure
+fun forEach[T](xs: List[T], f: @impure (T) => Null): Null = when(xs) {
+    Nil => null
+    is Cons(h, t) => { f(h); forEach(t, f) }
+}
+
+// ---------- 增删改 ----------
+fun append[T](xs: List[T], ys: List[T]): List[T] = when(xs) {
+    Nil => ys
+    is Cons(h, t) => Cons(h, append(t, ys))
+}
+
+fun take[T](xs: List[T], n: Nat): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) =>
+        if (n == 0) { Nil() }
+        else { unchecked var r = take(t, n - 1); Cons(h, r) }
+}
+
+fun drop[T](xs: List[T], n: Nat): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(_, t) =>
+        if (n == 0) { xs }
+        else { unchecked var r = drop(t, n - 1); r }
+}
+
+// 区间切片：slice(xs, 1, 3) 取 [1, 3) 段（from 含、to 不含）。
+fun slice[T](xs: List[T], from: Nat, to: Nat): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) =>
+        if (to <= from) { Nil() }
+        else {
+            if (from == 0) { unchecked var r = slice(t, 0, to - 1); Cons(h, r) }
+            else { slice(t, from - 1, to - 1) }
+        }
+}
+
+fun filter[T](xs: List[T], p: (T) => Bool): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) => if (p(h)) { Cons(h, filter(t, p)) } else { filter(t, p) }
+}
+
+fun distinct[T](xs: List[T]): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) => if (contains(t, h)) { distinct(t) } else { Cons(h, distinct(t)) }
+}
+
+fun sortBy[T](xs: List[T], f: (T, T) => Bool): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) => insertSort(h, sortBy(t, f), f)
+}
+
+// 插入排序的一步：f(a, b) 为「a 应排在 b 前」的序谓词。
+fun insertSort[T](x: T, xs: List[T], f: (T, T) => Bool): List[T] = when(xs) {
+    Nil => Cons(x, Nil())
+    is Cons(h, t) => if (f(x, h)) { Cons(x, Cons(h, t)) } else { Cons(h, insertSort(x, t, f)) }
+}
+
+// 反转：reverse([1, 2, 3]) = [3, 2, 1]。
+fun reverse[T](xs: List[T]): List[T] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) => append(reverse(t), Cons(h, Nil()))
+}
+
+fun clear[T](xs: List[T]): List[T] = Nil()
+
+// ---------- 聚合 ----------
+fun sum(xs: List[Nat]): Nat = xs.fold(0) { acc, x => acc + x }
+
+fun maxNat(xs: List[Nat]): Optional[Nat] = when(xs) {
+    Nil => None()
+    is Cons(h, t) => when(t) {
+        Nil => Some(h)
+        is Cons(_, _) => when(maxNat(t)) {
+            is Some(v) => if (h > v) { Some(h) } else { Some(v) }
+            None => Some(h)
+        }
+    }
+}
+
+fun minNat(xs: List[Nat]): Optional[Nat] = when(xs) {
+    Nil => None()
+    is Cons(h, t) => when(t) {
+        Nil => Some(h)
+        is Cons(_, _) => when(minNat(t)) {
+            is Some(v) => if (h < v) { Some(h) } else { Some(v) }
+            None => Some(h)
+        }
+    }
+}
+
+fun joinToString[T](xs: List[T], sep: Str): Str = xs.fold("") { acc, x =>
+    if (acc == "") { toStr(x) } else { concat(acc, concat(sep, toStr(x))) }
+}
+
+// ---------- 转换 ----------
+fun zip[A, B](xs: List[A], ys: List[B]): List[(A, B)] = when(xs) {
+    Nil => Nil()
+    is Cons(h, t) => when(ys) {
+        Nil => Nil()
+        is Cons(h2, t2) => Cons((h, h2), zip(t, t2))
+    }
+}
+
+fun toSet[A](xs: List[A]): Set[A] = when(xs) {
+    Nil => SetNil()
+    is Cons(h, t) => add(toSet(t), h)
+}
+
+fun toMap[K, V](xs: List[(K, V)]): Map[K, V] = when(xs) {
+    Nil => MapNil()
+    is Cons(pr, t) => when(pr) {
+        (k, v) => put(toMap(t), k, v)
+    }
+}

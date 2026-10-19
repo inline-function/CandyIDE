@@ -1,0 +1,7 @@
+candy.jsapk.runtime.jsapk-template-pngs-0 F:\KotlinProject\CandyIDE\jsapk-template\build\generated\res\pngs\release
+candy.jsapk.runtime.jsapk-template-resValues-1 F:\KotlinProject\CandyIDE\jsapk-template\build\generated\res\resValues\release
+candy.jsapk.runtime.jsapk-template-packageReleaseResources-2 F:\KotlinProject\CandyIDE\jsapk-template\build\intermediates\incremental\release\packageReleaseResources\merged.dir
+candy.jsapk.runtime.jsapk-template-packageReleaseResources-3 F:\KotlinProject\CandyIDE\jsapk-template\build\intermediates\incremental\release\packageReleaseResources\stripped.dir
+candy.jsapk.runtime.jsapk-template-release-4 F:\KotlinProject\CandyIDE\jsapk-template\build\intermediates\merged_res\release\mergeReleaseResources
+candy.jsapk.runtime.jsapk-template-main-5 F:\KotlinProject\CandyIDE\jsapk-template\src\main\res
+candy.jsapk.runtime.jsapk-template-release-6 F:\KotlinProject\CandyIDE\jsapk-template\src\release\res

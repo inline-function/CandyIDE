@@ -1,0 +1,72 @@
+// core.collection.optional —— Optional[T]（空安全容器：Some(v) / None()）
+// 依赖：本模块（typeclass 的类型类、result 的 Result）；无跨包依赖。
+// 空安全糖（?. / ?: / Some→T 隐式解包）已从语言层移除——Optional 是普通容器：
+// 取值用 when 解构或 getOrElse/orElse 兜底。
+
+enum Optional[T] {
+    Some(T)
+    None()
+}
+
+impl Functor for Optional[a] {
+    fun map[A, B](fa: Optional[A], f: (A) => B): Optional[B] = when(fa) {
+        is Some(v) => Some(f(v))
+        None => None()
+    }
+}
+
+impl Foldable for Optional[a] {
+    fun fold[A, R](fa: Optional[A], init: R, f: (R, A) => R): R = when(fa) {
+        is Some(v) => f(init, v)
+        None => init
+    }
+}
+
+impl Monad for Optional[a] {
+    fun pure[A](x: A): Optional[A] = Some(x)
+
+    fun flatMap[A, B](fa: Optional[A], f: (A) => Optional[B]): Optional[B] = when(fa) {
+        is Some(v) => f(v)
+        None => None()
+    }
+}
+
+// ---------- 判定与解构 ----------
+// 依据：Some 即单元素容器（size = 1），None 即空（size = 0）。
+fun isSome[T](o: Optional[T]): Bool = when(o) {
+    is Some(_) => true
+    None => false
+}
+
+fun isNone[T](o: Optional[T]): Bool = when(o) {
+    is Some(_) => false
+    None => true
+}
+
+// 取值兜底：None 回退默认值（替代已移除的 ?: 空替代语法）。
+fun getOrElse[T](o: Optional[T], d: T): T = when(o) {
+    is Some(v) => v
+    None => d
+}
+
+// 空替代：None 时切换到另一个 Optional（不改变 Some 的内容）。
+fun orElse[T](o: Optional[T], d: Optional[T]): Optional[T] = when(o) {
+    is Some(_) => o
+    None => d
+}
+
+// 过滤：谓词不成立时降级为 None。
+fun filter[T](o: Optional[T], p: (T) => Bool): Optional[T] = when(o) {
+    is Some(v) => if (p(v)) { Some(v) } else { None() }
+    None => None()
+}
+
+fun toResult[T, E](o: Optional[T], e: E): Result[T, E] = when(o) {
+    is Some(v) => Ok(v)
+    None => Err(e)
+}
+
+fun toList[T](o: Optional[T]): List[T] = when(o) {
+    is Some(v) => Cons(v, Nil())
+    None => Nil()
+}

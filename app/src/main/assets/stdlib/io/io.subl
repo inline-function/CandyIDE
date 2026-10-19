@@ -1,0 +1,41 @@
+// core.io —— IO 内建声明（P3 v1.0 计划 §5 + v2.0 异步标记）
+// 依赖：core.collection（Result）。
+// 全部 @impure：副作用是 @impure 语义的唯一来源；IO 标 @async——挂起操作须在
+// async 上下文调用（main 天然 async，Task 体天然 async）。
+// P5（决策 81）：IO 失败可携带错误信息——readFile/writeFile/readLine 返回 Result。
+
+// ---------- 标准输出 ----------
+@impure
+@root fun print(v: Any): Null
+
+// ---------- 控制台输入 ----------
+// 读一行 stdin：EOF 或失败返回 Err(msg)。
+@impure @async
+@root fun readLine(): Result[Str, Str]
+
+// ---------- 文件 ----------
+// 读文件（UTF-8）：失败返回 Err(msg)。
+@impure @async
+@root fun readFile(p: Str): Result[Str, Str]
+// 写文件（覆盖）：失败返回 Err(msg)。
+@impure @async
+@root fun writeFile(p: Str, c: Str): Result[Null, Str]
+// 追加写：失败返回 Err(msg)。
+@impure @async
+@root fun appendFile(p: Str, c: Str): Result[Null, Str]
+// 存在性判定。
+@impure
+@root fun fileExists(p: Str): Bool
+// 列目录：失败返回 Err(msg)。
+@impure @async
+@root fun readDir(p: Str): Result[List[Str], Str]
+
+// ---------- 命令行 ----------
+// 进程参数（不含程序名）：List 数组化后直接返回 JS 数组。
+@impure
+@root fun getArgs(): List[Str]
+
+// ---------- 线程 ----------
+// 显式延时（毫秒）：Promise + setTimeout，恒为挂起点。
+@impure @async
+@root fun sleep(ms: Nat): Null

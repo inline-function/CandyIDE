@@ -1,0 +1,2 @@
+# core.logic —— 命题演算/等式推理/量词定理（依赖 core.math）
+mount core.math

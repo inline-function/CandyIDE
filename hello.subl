@@ -1,0 +1,10 @@
+// Sublimation 编译示例 —— 点右上角「运行」编译成 JS 并执行
+@impure fun main() {
+  var s = "Hello, Sublimation!"
+  print(s)
+  var add = { x => x + 1 }
+  print(add(41))
+  var p = (3, 4)
+  var (a, b) = p
+  print(a + b)
+}

@@ -1,0 +1,2 @@
+# core.classic —— 经典逻辑定理（依赖 core.logic）
+mount core.logic

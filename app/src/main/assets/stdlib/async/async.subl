@@ -1,0 +1,15 @@
+// core.async —— 异步内建运行时层（任务调度）
+// 依赖：core.collection（collectToList 的 List）。
+// 全部 @impure @async：调用即挂起点，codegen 编译期 JS 特判翻译（小运行时在
+// 调用点注入：Channel/Mutex/Flow 的运行时 class）。
+
+// ---------- 任务组合 ----------
+// 先启动 f（不阻塞），主路径继续 g，join 等 f 收尾。
+@impure @async
+@root fun runBoth(f: () => Null, g: () => Null): Null
+// 先做完 f 再做 g（串行语义）。
+@impure @async
+@root fun runSeq(f: () => Null, g: () => Null): Null
+// 显式延时（毫秒）：sleep 的语义包装。
+@impure @async
+@root fun delay(ms: Nat): Null

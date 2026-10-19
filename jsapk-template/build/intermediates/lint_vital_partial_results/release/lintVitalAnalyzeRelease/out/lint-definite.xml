@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.7.3" type="incidents">
+
+    <incident
+        id="ExpiredTargetSdkVersion"
+        severity="fatal"
+        message="Google Play requires that apps target API level 33 or higher.">
+        <location
+            file="${:jsapk-template*projectDir}/build.gradle.kts"
+            line="13"
+            column="9"
+            startOffset="282"
+            endLine="13"
+            endColumn="23"
+            endOffset="296"/>
+    </incident>
+
+</incidents>

@@ -1,0 +1,16 @@
+// core.async.mutex —— Mutex 互斥锁
+// 依赖：core.collection（List 形参的配套工具）。
+// 互斥锁创建语法 Mutex()：无类型参数（内建类型 Mutex）。
+// 对象方法（运行时 class 注入，均挂起）：
+//   lock() / unlock()         底层加解锁（一般直接用 withLock）
+//   withLock(f)               临界区：f 在锁内执行，退出即解锁
+
+// 临界区包装：m.withLock(f)。
+@impure @async
+@root fun withMutex(m: Mutex, f: () => Null): Null
+// 计数器自增（读-改-写复合操作示例）。
+@impure @async
+@root fun bumpCounter[T](m: Mutex, c: T): Null
+// 双计数器配对自增。
+@impure @async
+@root fun bumpPair[T](m1: Mutex, m2: Mutex, c1: T, c2: T): Null

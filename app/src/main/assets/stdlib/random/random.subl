@@ -1,0 +1,11 @@
+// core.random —— 随机数内建声明
+// 依赖：无。
+// rand：JS Math.random() 语义——[0, 1) 区间均匀分布的 Rat。
+
+// [0, 1) 均匀随机数。
+@impure
+@root fun rand(): Rat
+
+// 区间随机 Nat：randNat(n) ∈ [0, n)。
+@impure
+fun randNat(n: Nat): Nat = floor(rand() * toRat(n))
