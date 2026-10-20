@@ -99,7 +99,8 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
             for (fc in calls) {
                 val name = fc.name
                 val args = fc.args ?: emptyMap()
-                val result = runCatching { tools.execute(name, args) }.getOrElse { "工具执行出错: ${it.message}" }
+                val tried = runCatching { tools.execute(name, args) }
+                val result = tried.getOrElse { ex: Throwable -> "工具执行出错: " + ex.message }
                 val part = Part(functionResponse = com.google.adk.kt.types.FunctionResponse(name = name, response = mapOf("result" to result)))
                 next.add(Content(parts = listOf(part), role = "user"))
                 emit(toolEvent(name, args, result))
@@ -116,6 +117,11 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
         }
     }
 
+    private fun toolText(name: String, args: Map<String, Any?>, result: String): String {
+        val argStr = args.entries.joinToString(", ") { entry -> entry.key.toString() + "=" + entry.value }
+        return "[工具 " + name + "] " + argStr + "\n" + result
+    }
+
     companion object {
         fun eventOf(content: Content, author: String): Event = Event(
             id = java.util.UUID.randomUUID().toString(),
@@ -130,7 +136,7 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
             id = java.util.UUID.randomUUID().toString(),
             invocationId = "local",
             author = "tool",
-            content = Content(parts = listOf(Part(text = "[工具 $name] ${args.entries.joinToString { "${it.key}=${it.value}" }}\n$result")), role = "user"),
+            content = Content(parts = listOf(Part(text = toolText(name, args, result))), role = "user"),
         )
     }
 }

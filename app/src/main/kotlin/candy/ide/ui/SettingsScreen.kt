@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import candy.ide.data.Settings
 import candy.ide.data.ShizukuManager
-import candy.ide.data.Settings
 import candy.ide.terminal.TerminalBridge
 import candy.ide.editor.Schemes
 import candy.ide.ui.theme.CandyBg

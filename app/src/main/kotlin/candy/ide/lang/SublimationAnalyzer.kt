@@ -121,7 +121,7 @@ class SublimationAnalyzer(
         Kind.AMP, Kind.PIPE, Kind.BANG ->
             Schemes.styleOfToken("operator")
 
-        Kind.LPAREN, Kind.RPAREN, Kind.LBRACKET, Kind.RBRACKET, Kind.LBRACE, Kind.RBRACE,
+        Kind.LPAREN, Kind.RPAREN, Kind.LBRACKET, Kind.RBRACKET, Kind.LBRACE, Kind.RBRACE, Kind.LIN_LBRACE,
         Kind.COMMA, Kind.SEMI, Kind.COLON, Kind.DOT, Kind.BACKSLASH, Kind.DOLLAR, Kind.HASH, Kind.SYMBOL ->
             Schemes.styleOfToken("punctuation")
 
