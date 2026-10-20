@@ -1,5 +1,6 @@
 package candy.ide.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -58,6 +59,8 @@ fun AgentScreen(vm: CandyViewModel) {
     LaunchedEffect(vm.chat.size) {
         if (vm.chat.isNotEmpty()) listState.animateScrollToItem(vm.chat.size - 1)
     }
+
+    BackHandler { vm.screen.value = Screen.Editor }
 
     androidx.compose.material3.Scaffold(
         containerColor = CandyBg,

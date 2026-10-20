@@ -1,6 +1,7 @@
 package candy.ide.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +94,8 @@ fun TerminalScreen(vm: CandyViewModel) {
         lines.add(TermLine("敲命令试试：git status / pkg install git / ls", TermLine.Kind.SYS))
     }
     LaunchedEffect(lines.size) { listState.animateScrollToItem((lines.size - 1).coerceAtLeast(0)) }
+
+    BackHandler { vm.screen.value = Screen.Editor }
 
     Scaffold(
         containerColor = TermBg,
