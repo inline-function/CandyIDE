@@ -138,6 +138,7 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
             item { SectionRow("工程类型", when (type) {
                 ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
                 ProjectStore.TYPE_SCRIPT -> "脚本工程"
+                ProjectStore.TYPE_MD -> "md 文档工程"
                 else -> "JS 平台工程"
             }) }
             if (showApk) {

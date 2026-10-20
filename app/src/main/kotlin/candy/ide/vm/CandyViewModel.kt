@@ -311,6 +311,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             when (ProjectStore.typeOf(dir)) {
                 ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
                 ProjectStore.TYPE_SCRIPT -> "脚本工程"
+                ProjectStore.TYPE_MD -> "md 文档工程"
                 else -> "JS 平台工程"
             } + "）")
     }
@@ -940,6 +941,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 指定工程打包：有 jsapk.json（JS-apk 或 JS 平台工程在设置页配过）走它，否则 JS 平台工程用自动 ASCII 包名 */
     fun buildApkProject(dir: File) {
+        // md 文档工程走专用打包链路（不编译 subl，只打包文档与阅读器）
+        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_MD) { buildMdApkProject(dir); return }
         if (File(dir, "jsapk.json").isFile) { buildApkIn(dir); return }
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) { buildApkIn(dir); return }
         buildApkIn(dir, JsApkConfig(
@@ -951,6 +954,38 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun buildApk() {
         buildApkProject(currentProject.value ?: return)
+    }
+
+    /** md 文档工程打包：收集 .md → 阅读器壳注进模板 APK → 签名 → build/app.apk */
+    fun buildMdApkProject(dir: File) {
+        if (running.value) return
+        running.value = true
+        openDrawerTab(1)
+        mdLog("**[打包]** md 文档工程 收集文档 → 注入阅读器 → 签名")
+        io.execute {
+            try {
+                val cfg = JsApkConfig(
+                    pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
+                    label = dir.name,
+                )
+                val apk = candy.ide.jsapk.MdApkBuilder.build(getApplication(), dir, cfg) { n ->
+                    mdLog("**[打包]** 收集到 " + n + " 篇文档")
+                }
+                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 在工程 build/ 目录")
+                mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
+                main.post { runFailed.value = false }
+                if (Settings.silentInstall) installPkg(apk, cfg.pkg)
+                else main.post {
+                    pendingPkg.value = cfg.pkg
+                    pendingApk.value = apk
+                }
+            } catch (t: Throwable) {
+                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
+                main.post { runFailed.value = true }
+            } finally {
+                main.post { running.value = false }
+            }
+        }
     }
 
     /** 工程设置页也能触发：指定工程打包，入口/包名走该工程的 jsapk.json */

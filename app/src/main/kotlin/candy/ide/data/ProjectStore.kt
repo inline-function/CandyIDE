@@ -19,6 +19,8 @@ object ProjectStore {
     const val TYPE_JS = "js"          // JS 平台工程：编译 → JS → WebView 执行
     const val TYPE_SCRIPT = "script"  // 脚本工程：解释器直接执行（语言服务支持待补）
     const val TYPE_JSAPK = "jsapk"    // JS-apk 工程：编译 → JS → 注进模板 APK → 安装
+    const val TYPE_MD = "md"          // md 文档工程：打包成只读文档 APK（含 md 库 + 文档文件页）
+    private const val BUILTIN_MARKER = ".candy_builtin"   // 内置工程标记（存在即只读）
 
     private const val META = "candy.project"
 
@@ -56,16 +58,28 @@ object ProjectStore {
         File(dir, META).writeText("type=" + type)
     }
 
+    /** 内置工程根目录（语言文档 / IDE 文档）：只读，不可编辑 */
+    fun builtinRoot(ctx: android.content.Context): File = File(Engine.root(ctx), "builtin")
+
+    /** 是否为内置工程（语言文档/IDE 文档等）：工程目录里有 .candy_builtin 标记，一律只读 */
+    fun isBuiltin(dir: File?): Boolean =
+        dir != null && File(dir, BUILTIN_MARKER).isFile
+
+    /** 把工程标记为内置（只读） */
+    fun markBuiltin(dir: File) = runCatching { File(dir, BUILTIN_MARKER).writeText("1") }
+
     /** 读工程类型：有标记读标记，否则按内容里有无 .subl 推断，兜底 JS 平台 */
     fun typeOf(dir: File): String {
         val meta = File(dir, META)
         if (meta.isFile) {
             val raw = runCatching { meta.readText() }.getOrNull() ?: ""
             val t = raw.substringAfter("type=", "").trim()
-            if (t == TYPE_JS || t == TYPE_SCRIPT || t == TYPE_JSAPK) return t
+            if (t == TYPE_JS || t == TYPE_SCRIPT || t == TYPE_JSAPK || t == TYPE_MD) return t
         }
         val hasSubl = dir.walkTopDown().any { it.isFile && it.name.endsWith(".subl") }
-        return if (hasSubl) TYPE_JS else TYPE_SCRIPT
+        if (hasSubl) return TYPE_JS
+        val hasMd = dir.walkTopDown().any { it.isFile && it.name.endsWith(".md") }
+        return if (hasMd) TYPE_MD else TYPE_SCRIPT
     }
 
     /** 重命名工程目录（返回是否成功） */

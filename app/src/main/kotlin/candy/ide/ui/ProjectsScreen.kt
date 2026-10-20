@@ -163,6 +163,7 @@ private fun ProjectCard(dir: File, onClick: () -> Unit, onSettings: () -> Unit, 
                         when (type) {
                             ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
                             ProjectStore.TYPE_SCRIPT -> "脚本工程"
+                            ProjectStore.TYPE_MD -> "md 文档工程"
                             else -> "JS 平台工程"
                         },
                         color = if (type == ProjectStore.TYPE_JSAPK) CandyPrimary else if (type == ProjectStore.TYPE_JS) CandySecondary else CandyTextDim,
@@ -231,29 +232,39 @@ private fun NewProjectDialog(onCreate: (String, String) -> Unit, onDismiss: () -
                 Spacer(Modifier.size(12.dp))
                 Text("工程类型", color = CandyTextDim, style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.size(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = typeSel == 0,
-                        onClick = { typeSel = 0 },
-                        label = { Text("JS 平台工程") }
-                    )
-                    FilterChip(
-                        selected = typeSel == 1,
-                        onClick = { typeSel = 1 },
-                        label = { Text("脚本工程") }
-                    )
-                    FilterChip(
-                        selected = typeSel == 2,
-                        onClick = { typeSel = 2 },
-                        label = { Text("JS-apk 工程") }
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = typeSel == 0,
+                            onClick = { typeSel = 0 },
+                            label = { Text("JS 平台工程") }
+                        )
+                        FilterChip(
+                            selected = typeSel == 1,
+                            onClick = { typeSel = 1 },
+                            label = { Text("脚本工程") }
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = typeSel == 2,
+                            onClick = { typeSel = 2 },
+                            label = { Text("JS-apk 工程") }
+                        )
+                        FilterChip(
+                            selected = typeSel == 3,
+                            onClick = { typeSel = 3 },
+                            label = { Text("md 文档工程") }
+                        )
+                    }
                 }
                 Spacer(Modifier.size(6.dp))
                 Text(
                     when (typeSel) {
                         0 -> "编译成 JS 在 WebView 执行，需 fun main() 入口（语言服务已支持）"
                         1 -> "顶层语句直接解释执行（语言服务诊断待补）"
-                        else -> "编译成 JS 注进内置模板 APK，在本机直接安装（SDK 首版：固定包名 candy.jsapk.runtime）"
+                        2 -> "编译成 JS 注进内置模板 APK，在本机直接安装（SDK 首版：固定包名 candy.jsapk.runtime）"
+                        else -> "打包成只读文档 APK：含 md 渲染库与文档文件页，不可编辑"
                     },
                     color = CandyTextDim,
                     style = MaterialTheme.typography.bodySmall
@@ -262,7 +273,7 @@ private fun NewProjectDialog(onCreate: (String, String) -> Unit, onDismiss: () -
         },
         confirmButton = {
             TextButton(
-                onClick = { onCreate(name.trim(), when (typeSel) { 1 -> ProjectStore.TYPE_SCRIPT; 2 -> ProjectStore.TYPE_JSAPK; else -> ProjectStore.TYPE_JS }) },
+                onClick = { onCreate(name.trim(), when (typeSel) { 1 -> ProjectStore.TYPE_SCRIPT; 2 -> ProjectStore.TYPE_JSAPK; 3 -> ProjectStore.TYPE_MD; else -> ProjectStore.TYPE_JS }) },
                 enabled = name.isNotBlank() && error == null
             ) { Text("创建") }
         },

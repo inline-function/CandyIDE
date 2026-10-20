@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import candy.ide.data.ProjectStore
 import candy.ide.data.TreeNode
 import candy.ide.data.buildTree
 import candy.ide.ui.theme.CandyBg
@@ -114,7 +115,8 @@ fun FileTreePanel(
                 )
             }
         }
-        // 多选操作栏：删除 / 复制 / 剪切 / 压缩为 zip
+        // 多选操作栏：删除 / 复制 / 剪切 / 压缩为 zip（内置工程只读，仅有复制）
+        val readOnlyBar = project != null && ProjectStore.isBuiltin(project)
         if (multiMode) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -122,7 +124,7 @@ fun FileTreePanel(
                         onClick = { vm.copyMulti(multiSet.toList()); multiSet.clear(); multiMode = false },
                         label = { Text("复制", style = MaterialTheme.typography.labelSmall) },
                     )
-                    androidx.compose.material3.AssistChip(
+                    if (!readOnlyBar) androidx.compose.material3.AssistChip(
                         onClick = { vm.cutMulti(multiSet.toList()); multiSet.clear(); multiMode = false },
                         label = { Text("剪切", style = MaterialTheme.typography.labelSmall) },
                     )
@@ -134,7 +136,7 @@ fun FileTreePanel(
                         },
                         label = { Text("压缩 zip", style = MaterialTheme.typography.labelSmall) },
                     )
-                    androidx.compose.material3.AssistChip(
+                    if (!readOnlyBar) androidx.compose.material3.AssistChip(
                         onClick = {
                             if (multiSet.isNotEmpty()) {
                                 pendingDeleteMulti = multiSet.toList()
@@ -186,8 +188,14 @@ fun FileTreePanel(
         }
     }
 
+    // 只读工程（内置工程）：禁止增删改，只留打开与复制路径
+    val readOnly = project != null && ProjectStore.isBuiltin(project)
     menuNode?.let { node ->
-        val items = if (node.isDir) listOf(
+        val items = if (readOnly) listOf(
+            "打开" to { onFileClick(node.file); menuNode = null; drawerClose() },
+            "复制路径" to { vm.copyPath(ctx, node.file); menuNode = null },
+        )
+        else if (node.isDir) listOf(
             "创建子文件" to { newNameDialog = NewNodeRequest(node.file, false); menuNode = null },
             "创建子目录" to { newNameDialog = NewNodeRequest(node.file, true); menuNode = null },
             if (vm.clipFile.value != null) "粘贴文件" to { vm.pasteInto(node.file); menuNode = null } else null,

@@ -69,8 +69,8 @@ data class JsApkConfig(
  */
 object JsApkBuilder {
 
-    private const val ASSET_TEMPLATE = "sdk/jsapk/template.apk"
-    private const val TEMPLATE_VERSION = 3
+    internal const val ASSET_TEMPLATE = "sdk/jsapk/template.apk"
+    internal const val TEMPLATE_VERSION = 3
 
     /** 编译入口文件并打包：返回产物路径 */
     fun build(ctx: Context, entryFile: File, cfg: JsApkConfig, onCompiled: ((Long) -> Unit)? = null): File {

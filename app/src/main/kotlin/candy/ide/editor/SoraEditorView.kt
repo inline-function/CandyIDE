@@ -53,6 +53,8 @@ fun SoraEditorView(
     onEditorClick: () -> Unit = {},
     onCursorChange: (line: Int, column: Int) -> Unit = { _, _ -> },
     onTextChange: (String) -> Unit = {},
+    // 只读工程（md 文档 / 内置文档）：编辑器整体不可输入
+    readOnly: Boolean = false,
 ) {
     var editor by remember { mutableStateOf<CodeEditor?>(null) }
     var layoutInstalled by remember { mutableStateOf(false) }
@@ -91,6 +93,7 @@ fun SoraEditorView(
                 setTextSize(fontSize.toFloat())
                 isWordwrap = wordWrap
                 isLineNumberEnabled = true
+                setEditable(!readOnly)
 
                 // 补全弹窗换带长按的布局（sora 默认布局无长按回调）
                 val ac = getComponent(EditorAutoCompletion::class.java)
@@ -206,6 +209,7 @@ fun SoraEditorView(
             FontManager.typeface(ctx, fontId)?.let { ed.setTypefaceText(it) }
             ed.setTextSize(fontSize.toFloat())
             ed.isWordwrap = wordWrap
+            ed.setEditable(!readOnly)
             if (loaded != file || vm.forceReloadNonce.intValue != reloadKey) {
                 loaded = file
                 reloadKey = vm.forceReloadNonce.intValue

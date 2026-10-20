@@ -122,10 +122,14 @@ fun EditorScreen(vm: CandyViewModel) {
     var editor by remember { mutableStateOf<CodeEditor?>(null) }
     val ctx = LocalContext.current
     val safe = currentFile
-    // md 预览渲染时编辑器实例是上个标签页的：保存/运行要挡住；md 文本模式下可编辑
-    val isEditableFile = safe != null &&
-        (!safe.name.endsWith(".md") || vm.mdTextMode[safe.absolutePath] == true)
+    // 内置工程（语言文档/IDE 文档）：只读，不可编辑
+    val isMdProject = remember(currentProject) {
+        currentProject?.let { ProjectStore.isBuiltin(it) } == true
+    }
     val isJsApk = remember(currentProject) { currentProject?.let { ProjectStore.typeOf(it) } == ProjectStore.TYPE_JSAPK }
+    // md 预览渲染时编辑器实例是上个标签页的：保存/运行要挡住；md 文本模式下可编辑
+    val isEditableFile = safe != null && !isMdProject &&
+        (!safe.name.endsWith(".md") || vm.mdTextMode[safe.absolutePath] == true)
     var longMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var quickMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var diagInfo by remember { mutableStateOf<candy.ide.data.DiagItem?>(null) }
@@ -507,6 +511,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                 file = active,
                                 vm = vm,
                                 textProvider = vm::loadTextFor,
+                                readOnly = isMdProject,
                                 onEditorReady = { editor = it },
                                 onLongPress = { x, y, line, col ->
                                     longMenu = LongPressMenu(x, y, line, col)
@@ -618,8 +623,11 @@ fun EditorScreen(vm: CandyViewModel) {
                                     val ed3 = editor
                                     LongMenuRow("全选文本") { quickMenu = null; ed3?.selectAll() }
                                     LongMenuRow("复制文本") { quickMenu = null; ed3?.copyText() }
-                                    LongMenuRow("剪切文本") { quickMenu = null; ed3?.cutText() }
-                                    LongMenuRow("粘贴文本") { quickMenu = null; ed3?.pasteText() }
+                                    // 只读工程（md 文档工程 / 内置工程）：禁止剪切与粘贴
+                                    if (!isMdProject) {
+                                        LongMenuRow("剪切文本") { quickMenu = null; ed3?.cutText() }
+                                        LongMenuRow("粘贴文本") { quickMenu = null; ed3?.pasteText() }
+                                    }
                                 }
                             }
                         }
