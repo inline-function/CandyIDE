@@ -3,6 +3,7 @@ package candy.ide.ui
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.clickable
@@ -73,6 +74,8 @@ fun AgentFloatingBall(vm: CandyViewModel) {
     var expanded by remember { mutableStateOf(false) }
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(240f) }
+    var winOffsetX by remember { mutableStateOf(0f) }
+    var winOffsetY by remember { mutableStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -111,19 +114,27 @@ fun AgentFloatingBall(vm: CandyViewModel) {
                     Icon(Icons.Default.SmartToy, contentDescription = "AI 助手", tint = Color.White, modifier = Modifier.size(26.dp))
                 }
         } else {
-            // 展开态：迷你聊天窗（贴右下，避开输入法）
+            // 展开态：迷你聊天窗（可拖动；尺寸约为全宽的一半）
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .imePadding(),
+                    .offset { androidx.compose.ui.unit.IntOffset(winOffsetX.toInt(), winOffsetY.toInt()) },
             ) {
                 MiniChatWindow(
                 vm = vm,
+                onDrag = { dx, dy ->
+                    winOffsetX += dx
+                    winOffsetY += dy
+                },
                 onFullScreen = {
                     expanded = false
+                    winOffsetX = 0f; winOffsetY = 0f
                     vm.screen.value = Screen.Agent
                 },
-                onClose = { expanded = false },
+                onClose = {
+                    expanded = false
+                    winOffsetX = 0f; winOffsetY = 0f
+                },
                 )
             }
         }
@@ -133,6 +144,7 @@ fun AgentFloatingBall(vm: CandyViewModel) {
 @Composable
 private fun MiniChatWindow(
     vm: CandyViewModel,
+    onDrag: (Float, Float) -> Unit,
     onFullScreen: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -147,19 +159,34 @@ private fun MiniChatWindow(
 
     Column(
         modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .height(340.dp)
+            .fillMaxWidth(0.46f)
+            .height(200.dp)
             .imePadding()
             .clip(RoundedCornerShape(14.dp))
             .background(FloatBg)
             .padding(10.dp),
     ) {
-        // 标题行：模型名 / 全屏 / 关闭
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // 标题行：模型名 / 全屏 / 关闭（按住拖动整窗）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { }, 
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount.x, dragAmount.y)
+                    },
+                )
+            },
+        ) {
             Icon(Icons.Default.SmartToy, contentDescription = null, tint = BubbleColor, modifier = Modifier.size(16.dp))
             Spacer(Modifier.size(6.dp))
             Text(Settings.agentModel, color = Color.White, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
+            if (sending) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = BubbleColor, strokeWidth = 2.dp)
+                Spacer(Modifier.size(6.dp))
+            }
             Icon(
                 Icons.Default.Fullscreen,
                 contentDescription = "全屏",
@@ -182,9 +209,26 @@ private fun MiniChatWindow(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (vm.chat.isEmpty()) {
-                item { Text("问点关于 Sublimation 的…", color = FloatDim, fontSize = 12.sp) }
+                item {
+                    Column {
+                        Text("问点什么，或试试点这些：", color = FloatDim, fontSize = 12.sp)
+                        Spacer(Modifier.size(4.dp))
+                        QuickChip("当前工作区有什么文件？") { input = it }
+                        QuickChip("检查一下编译诊断") { input = it }
+                        QuickChip("解释这段代码") { input = it }
+                    }
+                }
             }
             items(vm.chat) { msg -> MiniBubble(msg) }
+            if (sending) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = BubbleColor, strokeWidth = 2.dp)
+                        Spacer(Modifier.size(6.dp))
+                        Text("正在思考…", color = FloatDim, fontSize = 11.sp)
+                    }
+                }
+            }
         }
         Spacer(Modifier.size(6.dp))
         // 输入行
@@ -225,6 +269,19 @@ private fun MiniChatWindow(
             }
         }
     }
+}
+
+/** 快捷指令小条：点一下把文字填进输入框 */
+@Composable
+private fun QuickChip(label: String, onPick: (String) -> Unit) {
+    Text(
+        label,
+        color = BubbleColor,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .padding(vertical = 2.dp)
+            .clickable { onPick(label) },
+    )
 }
 
 @Composable

@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Terminal
@@ -46,6 +48,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,6 +83,8 @@ fun TerminalScreen(vm: CandyViewModel) {
     val lines = remember { mutableStateListOf<TermLine>() }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    // 当前工作目录：cd 切换、提示符显示、命令执行前缀
+    var cwd by remember { mutableStateOf(vm.currentProject.value?.absolutePath ?: "/sdcard") }
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
@@ -91,9 +96,9 @@ fun TerminalScreen(vm: CandyViewModel) {
                 else -> "Termux：未安装（设置 → 伴生软件 下载）；Shizuku：" + shizukuHint()
             }, TermLine.Kind.SYS))
         if (proj != null) lines.add(TermLine("当前工程：" + proj, TermLine.Kind.SYS))
+        lines.add(TermLine("目录：" + cwd + "（cd 切换）", TermLine.Kind.SYS))
         lines.add(TermLine("敲命令试试：git status / pkg install git / ls", TermLine.Kind.SYS))
     }
-    LaunchedEffect(lines.size) { listState.animateScrollToItem((lines.size - 1).coerceAtLeast(0)) }
 
     BackHandler { vm.screen.value = Screen.Editor }
 
@@ -122,6 +127,7 @@ fun TerminalScreen(vm: CandyViewModel) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 items(lines) { line ->
                     Text(
@@ -137,29 +143,41 @@ fun TerminalScreen(vm: CandyViewModel) {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
                     )
                 }
+                // 输入行：跟在内容流后面（不是固定在最底下）
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(promptText(cwd, homeDir()), color = TermAccent, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            enabled = !busy,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(onGo = {
+                                val cmd = input.trim()
+                                if (cmd.isNotEmpty() && !busy) { input = ""; submitCmd(ctx, scope, lines, cmd, cwd, busy, { busy = it }, { cwd = it }) }
+                            }),
+                            singleLine = true,
+                            textStyle = TextStyle(color = TermFg, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                            cursorBrush = SolidColor(TermAccent),
+                            modifier = Modifier.weight(1f).onKeyEvent { e ->
+                                if (e.key == Key.Enter && input.isNotBlank() && !busy) {
+                                    val cmd = input; input = ""
+                                    submitCmd(ctx, scope, lines, cmd, cwd, busy, { busy = it }, { cwd = it })
+                                    true
+                                } else false
+                            },
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text("↵", color = TermDim, fontSize = 14.sp)
+                    }
+                }
             }
-            // 输入行
-            Row(
-                modifier = Modifier.fillMaxWidth().background(TermBg).padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("candy$ ", color = TermAccent, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                BasicTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    enabled = !busy,
-                    textStyle = TextStyle(color = TermFg, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
-                    cursorBrush = SolidColor(TermAccent),
-                    modifier = Modifier.weight(1f).onKeyEvent { e ->
-                        if (e.key == Key.Enter && input.isNotBlank() && !busy) {
-                            val cmd = input; input = ""
-                            submit(ctx, scope, lines, cmd) { busy = it }
-                            true
-                        } else false
-                    },
-                )
-                Spacer(Modifier.size(6.dp))
-                Text("↵", color = TermDim, fontSize = 14.sp)
+            // 底部输入框聚焦句柄：保持 IME 弹起时输入行可见
+            LaunchedEffect(lines.size, busy) {
+                listState.animateScrollToItem((lines.size).coerceAtLeast(0))
             }
             Spacer(Modifier.height(2.dp))
         }
@@ -178,21 +196,84 @@ private fun TextButtonTiny(label: String, enabled: Boolean, onClick: () -> Unit)
     )
 }
 
+private fun homeDir(): String =
+    System.getProperty("user.home", "/data/data/com.termux/files/home")
+
 private fun shizukuHint(): String =
     if (candy.ide.data.ShizukuManager.state() == candy.ide.data.ShizukuManager.State.RUNNING_GRANTED) "已授权，命令直连执行"
     else "未连接（设置里连接后命令直接在本终端执行）"
+
+/** 把相对路径解析成绝对路径（支持 .. / . / ~ / 家目录） */
+private fun resolvePath(base: String, rel: String, home: String): String {
+    val target = when {
+        rel.isEmpty() || rel == "~" -> home
+        rel.startsWith("~") -> home + rel.substring(1)
+        rel.startsWith("/") -> rel
+        else -> base.trimEnd('/') + "/" + rel
+    }
+    // 规范化 . / ..
+    val parts = java.util.ArrayDeque<String>()
+    for (seg in target.split("/")) {
+        when {
+            seg.isEmpty() || seg == "." -> { }
+            seg == ".." -> { if (parts.isNotEmpty()) parts.removeLast() }
+            else -> parts.addLast(seg)
+        }
+    }
+    return "/" + parts.joinToString("/")
+}
+
+/** 提示符：家目录显示 ~，其余取最后两段更短一点 */
+private fun promptText(cwd: String, home: String): String {
+    val disp = if (cwd == home) "~" else if (cwd.startsWith(home + "/")) "~" + cwd.substring(home.length) else cwd
+    return "candy " + disp + " $ "
+}
+
+/** 命令入口：提示符先落行，cd/pwd 本地处理，其余走 submit 执行 */
+private fun submitCmd(
+    ctx: Context,
+    scope: CoroutineScope,
+    lines: SnapshotStateList<TermLine>,
+    raw: String,
+    cwd: String,
+    busy: Boolean,
+    setBusy: (Boolean) -> Unit,
+    setCwd: (String) -> Unit,
+) {
+    if (busy) return
+    val home = System.getProperty("user.home", "/data/data/com.termux/files/home")
+    val trimmed = raw.trim()
+    // cd：本地切换工作目录
+    if (trimmed == "cd" || trimmed.startsWith("cd ")) {
+        val rel = trimmed.removePrefix("cd").trim()
+        val target = resolvePath(cwd, rel, home)
+        setCwd(target)
+        lines.add(TermLine(promptText(cwd, home) + trimmed, TermLine.Kind.CMD))
+        lines.add(TermLine(target, TermLine.Kind.SYS))
+        return
+    }
+    // pwd：显示当前工作目录
+    if (trimmed == "pwd") {
+        lines.add(TermLine(promptText(cwd, home) + trimmed, TermLine.Kind.CMD))
+        lines.add(TermLine(cwd, TermLine.Kind.OUT))
+        return
+    }
+    lines.add(TermLine(promptText(cwd, home) + trimmed, TermLine.Kind.CMD))
+    submit(ctx, scope, lines, trimmed, cwd) { setBusy(it) }
+}
 
 private fun submit(
     ctx: Context,
     scope: CoroutineScope,
     lines: SnapshotStateList<TermLine>,
     cmd: String,
-    setBusy: (Boolean) -> Unit,
+    cwd: String? = null,
+    setBusy: (Boolean) -> Unit = {},
 ) {
     lines.add(TermLine("candy$ " + cmd, TermLine.Kind.CMD))
     setBusy(true)
     scope.launch {
-        val res = withContext(Dispatchers.IO) { TerminalBridge.exec(ctx, cmd) }
+        val res = withContext(Dispatchers.IO) { TerminalBridge.exec(ctx, cmd, cwd) }
         when (res.channel) {
             TerminalBridge.Channel.SHIZUKU -> {
                 if (res.output.isNotBlank()) lines.add(TermLine(res.output, TermLine.Kind.OUT))
@@ -210,6 +291,8 @@ private fun submit(
                     }
                 }
             }
+            TerminalBridge.Channel.TERMUX_UNSUITABLE -> lines.add(TermLine(res.output, TermLine.Kind.ERR))
+            TerminalBridge.Channel.NONE -> lines.add(TermLine(res.output, TermLine.Kind.ERR))
             else -> lines.add(TermLine(res.output, TermLine.Kind.ERR))
         }
         setBusy(false)

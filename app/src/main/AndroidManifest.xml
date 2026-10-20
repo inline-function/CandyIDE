@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 明文流量：私有部署/自建端点可能无 TLS，允许 http（https 默认可用） -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Termux RUN_COMMAND：没有 Shizuku 时把命令交给 Termux 执行（dangerous 级，需用户授权） -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
     <!-- Android 11+ 包可见性：查询伴生软件是否安装 -->
     <queries>

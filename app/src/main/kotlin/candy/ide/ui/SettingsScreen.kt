@@ -381,6 +381,15 @@ fun SettingsScreen(vm: CandyViewModel) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.size(8.dp))
+                    var agentPrompt by remember { mutableStateOf(Settings.agentPrompt) }
+                    OutlinedTextField(
+                        value = agentPrompt,
+                        onValueChange = { agentPrompt = it; Settings.agentPrompt = it; Settings.persist(ctx) },
+                        label = { Text("初始提示词（留空用内置默认）", color = CandyTextDim) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                    Spacer(Modifier.size(8.dp))
                 }
             }
             item { SectionTitle("伴生软件") }

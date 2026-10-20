@@ -35,7 +35,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
@@ -432,6 +434,26 @@ fun EditorScreen(vm: CandyViewModel) {
                     }
                     Box(modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged { editorSize = it }) {
                         val active = currentFile
+                        // Markdown 文件：右上角悬浮小按钮，渲染 / 文本模式互切
+                        if (active != null && active.name.endsWith(".md", ignoreCase = true)) {
+                            val rendering = vm.mdTextMode[active.absolutePath] != true
+                            androidx.compose.material3.SmallFloatingActionButton(
+                                onClick = { vm.mdTextMode[active.absolutePath] = rendering },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(end = 12.dp, top = 10.dp)
+                                    .size(40.dp),
+                                containerColor = candy.ide.ui.theme.CandySurface,
+                                contentColor = candy.ide.ui.theme.CandyPrimary,
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    if (rendering) androidx.compose.material.icons.Icons.Default.Description
+                                    else androidx.compose.material.icons.Icons.Default.MenuBook,
+                                    contentDescription = if (rendering) "切换为文本编辑" else "切换为渲染预览",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
                         if (active == null) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("从左侧文件树选择一个文件", color = CandyTextDim)
@@ -464,8 +486,16 @@ fun EditorScreen(vm: CandyViewModel) {
                                             val content = ed.text
                                             val cursor = ed.cursor
                                             runCatching {
+                                                // 先把已输入的关键词删掉，否则展开后会「ifif…」叠词
+                                                val left = cursor.left
+                                                var ws = left
+                                                while (ws > 0 && content[ws - 1].let { it == ' ' || it == '\t' }) ws--
+                                                var we = ws
+                                                while (we > 0 && content[we - 1].let { it.isLetterOrDigit() || it == '_' }) we--
+                                                val word = content.subSequence(we, ws).toString()
+                                                val start = if (word.equals(label, ignoreCase = true)) we else left
                                                 val batch = try { content.beginBatchEdit(); true } catch (_: Throwable) { false }
-                                                try { content.replace(cursor.left, cursor.right, tpl) }
+                                                try { content.replace(start, cursor.right, tpl) }
                                                 finally { if (batch) content.endBatchEdit() }
                                                 vm.onEditorTextChanged(content.toString())
                                                 vm.saveCurrent(content.toString())
@@ -1042,16 +1072,16 @@ private fun goToDefinitionAt(vm: CandyViewModel, editor: CodeEditor, line: Int, 
 
 /** 关键词模板：与 LSP 的 KEYWORDS snippet 对应（补全长按生成完整语句） */
 private val KEYWORD_TEMPLATES = mapOf(
-    "fun" to "fun name(): Null { \n}",
+    "fun" to "fun name(): Null {\n    \n}",
     "struct" to "struct Name(field: Nat)",
-    "enum" to "enum Name { \n}",
-    "class" to "class Name { \n}",
-    "impl" to "impl Type for Self { \n}",
+    "enum" to "enum Name {\n    \n}",
+    "class" to "class Name {\n    \n}",
+    "impl" to "impl Type for Self {\n    \n}",
     "var" to "var name = ",
     "type" to "type Name = ",
-    "if" to "if (condition) { \n}",
-    "else" to "else { \n}",
-    "when" to "when (x) { \n}",
+    "if" to "if (condition) {\n    \n} else {\n    \n}",
+    "else" to "else {\n    \n}",
+    "when" to "when (x) {\n    v => \n    else => \n}",
     "return" to "return ",
     "is" to "is ",
 )

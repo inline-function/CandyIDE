@@ -59,6 +59,24 @@ class CandyToolRegistry(private val ctx: Context) {
                 walk(root, 0)
             }
         },
+        "read_project_file" to { args ->
+            val rel = args["path"] as? String
+            if (rel.isNullOrBlank()) return@to "参数 path 必填（相对工程目录的路径）"
+            val root = currentProjectDir
+            if (root == null) "没有打开工程" else runCatching {
+                val f = java.io.File(root, rel)
+                if (!f.isFile) "文件不存在: $rel" else f.readText().take(8000)
+            }.getOrElse { "读取失败: ${it.message}" }
+        },
+        "write_current_file" to { args ->
+            val content = args["content"] as? String
+            if (content == null) return@to "参数 content 必填"
+            val p = currentFile
+            if (p == null) "没有打开的文件" else runCatching {
+                java.io.File(p).writeText(content)
+                "已写入 $p（" + content.length + " 字符）"
+            }.getOrElse { "写入失败: ${it.message}" }
+        },
         "list_project_files" to { _ ->
             val root = currentProjectDir
             if (root == null || !root.isDirectory) "没有打开工程"
@@ -86,5 +104,7 @@ class CandyToolRegistry(private val ctx: Context) {
 3. list_project_files —— 列出当前工程的文件清单（无参数）
 4. list_diagnostics —— 当前编辑器的编译诊断（无参数）
 5. get_project_tree —— 当前工程的目录树（无参数，忽略 build/隐藏目录）
+6. read_project_file {"path": "相对路径"} —— 读工程内任意文件
+7. write_current_file {"content": "全文"} —— 覆写编辑器当前打开的文件
 """.trimIndent()
 }

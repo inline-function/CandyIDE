@@ -37,20 +37,31 @@ class CandyAgent(private val ctx: Context) {
 
     val tools = CandyToolRegistry(ctx)
 
-    private val systemPrompt: String =
-        """你是 CandyIDE 的内置编程助手，服务于 Sublimation 语言的开发者。
+    /** 系统提示：设置页可配初始提示词，为空则用内置默认 */
+    private fun systemPrompt(): String =
+        (Settings.agentPrompt.trim().ifBlank {
+            """你是 CandyIDE 的内置编程助手，服务于 Sublimation 语言的开发者。
 Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），IDE 运行在 Android 上。
 回答用中文，简洁、给代码示例时用 Sublimation 语法：
   fun main() { unchecked print("hi") }   // 函数体、lambda { x -> x + 1 }、元组 (a, b)、模式匹配 match
 你可用工具读当前文件、执行 shell 命令、获取编译诊断。不确定就明说，别编造 API。
-""" + tools.toolDescriptions()
+"""
+        }) + tools.toolDescriptions()
 
 
     init {
         // ADK session：appName=candy.ide，userId=local，sessionId 固定（单用户 IDE）
-        session = kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-            sessionService.createSession(SessionKey("candy.ide", "local", "main"), emptyMap())
-        }
+        session = newSession("main")
+    }
+
+    /** 新建会话（新建/恢复对话时调用）*/
+    private fun newSession(id: String): Session = kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+        sessionService.createSession(SessionKey("candy.ide", "local", id), emptyMap())
+    }
+
+    /** 重置会话：丢弃旧上下文（聊天历史仍保留在 VM 的 chat 列表里） */
+    fun resetSession() {
+        session = newSession("conv-" + java.util.UUID.randomUUID().toString().take(6))
     }
 
     /** 发一句用户消息，返回逐条事件流（先用户后模型；工具调用会自动接力） */
@@ -62,7 +73,7 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
         emit(eventOf(userContent, author = "user"))
         // 2) 组织对话历史（system + session 里已累积的 events）
         val history = mutableListOf<Content>()
-        history.add(Content(parts = listOf(Part(text = systemPrompt)), role = "system"))
+        history.add(Content(parts = listOf(Part(text = systemPrompt())), role = "system"))
         for (e in session.events) {
             val c = e.content ?: continue
             if (c.role == "user" || c.role == "model") history.add(c)

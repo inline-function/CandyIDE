@@ -75,6 +75,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     val toast = mutableStateOf("")
     /** 日志等级过滤（输出抽屉） */
     val logFilter = mutableStateOf(candy.ide.ui.LogFilter())
+
+    /** 诊断等级过滤（输出抽屉）：错误/警告/提示/补充 四档 */
+    val diagFilter = mutableStateOf(candy.ide.ui.DiagFilter())
     /** 接收外部文件的等待框与结果 */
     val ingesting = mutableStateOf(false)
     val ingestResult = mutableStateOf<String?>(null)
@@ -455,7 +458,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     // —— AI agent ——
     val chat = mutableStateListOf<ChatMessage>()
     val agentBusy = mutableStateOf(false)
+    val agentStage = mutableStateOf("")   // "思考中…/调用工具 list_project_files…/空"
+    /** 往期对话存档 */
+    val conversations = mutableStateListOf<AgentConversation>()
     @Volatile private var agent: candy.ide.agent.CandyAgent? = null
+    private var agentJob: kotlinx.coroutines.Job? = null
 
     /** 问 agent 一句；事件流逐条落进 chat */
     fun askAgent(ctx: android.content.Context, text: String) {
@@ -468,24 +475,110 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
         chat.add(ChatMessage(ChatMessage.Role.USER, text))
         agentBusy.value = true
-        viewModelScope.launch {
+        agentStage.value = "思考中…"
+        agentJob = viewModelScope.launch {
             try {
                 agent!!.ask(text).collect { ev ->
                     val author = ev.author
                     if (author == "user") return@collect   // 用户气泡已在上方直接添加，跳过回声
                     val body = ev.content?.parts?.mapNotNull { it.text }?.joinToString("")?.trim() ?: ""
                     if (body.isBlank()) return@collect
+                    if (author == "tool") {
+                        val name = body!!.substringAfter("[工具 ").substringBefore(" ")
+                        agentStage.value = "调用工具 " + name + "…"
+                    }
                     val role = when (author) {
                         "model" -> ChatMessage.Role.MODEL
                         "tool" -> ChatMessage.Role.TOOL
                         else -> ChatMessage.Role.USER
                     }
-                    chat.add(ChatMessage(role, body))
+                    chat.add(ChatMessage(role, body!!))
                 }
             } catch (e: Exception) {
-                chat.add(ChatMessage(ChatMessage.Role.MODEL, "调用失败：${e.message ?: e.toString()}"))
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                chat.add(ChatMessage(ChatMessage.Role.MODEL, "调用失败：" + (e.message ?: e.toString())))
             } finally {
                 agentBusy.value = false
+                agentStage.value = ""
+            }
+        }
+    }
+
+    /** 随时停止当前生成 */
+    fun stopAgent() {
+        agentJob?.cancel()
+        agentJob = null
+        if (agentBusy.value) {
+            agentBusy.value = false
+            agentStage.value = ""
+            chat.add(ChatMessage(ChatMessage.Role.MODEL, "（已停止）"))
+        }
+    }
+
+    /** 新建对话：当前未空则存档，再清空并重置 agent 会话 */
+    fun newAgentChat(ctx: android.content.Context) {
+        stopAgent()
+        if (chat.isNotEmpty()) {
+            val first = chat.firstOrNull { it.role == ChatMessage.Role.USER }?.text ?: "对话"
+            conversations.add(0, AgentConversation(System.currentTimeMillis(), first, chat.toList()))
+            saveConversations(ctx)
+        }
+        chat.clear()
+        if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext)
+        agent!!.resetSession()
+    }
+
+    /** 恢复一段往期对话 */
+    fun restoreConversation(ctx: android.content.Context, conv: AgentConversation) {
+        stopAgent()
+        if (chat.isNotEmpty()) {
+            val first = chat.firstOrNull { it.role == ChatMessage.Role.USER }?.text ?: "对话"
+            conversations.add(0, AgentConversation(System.currentTimeMillis(), first, chat.toList()))
+        }
+        conversations.remove(conv)
+        chat.clear()
+        chat.addAll(conv.messages)
+        if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext)
+        agent!!.resetSession()
+        saveConversations(ctx)
+    }
+
+    /** 往期对话落盘（JSON；每段最多 80 条，只留最近 30 段） */
+    fun saveConversations(ctx: android.content.Context) {
+        runCatching {
+            val arr = org.json.JSONArray()
+            for (c in conversations.take(30)) {
+                val j = org.json.JSONObject()
+                    .put("time", c.time)
+                    .put("title", c.title)
+                val msgs = org.json.JSONArray()
+                for (m in c.messages.takeLast(80)) msgs.put(org.json.JSONObject().put("role", m.role.name).put("text", m.text))
+                j.put("messages", msgs)
+                arr.put(j)
+            }
+            val dir = java.io.File(candy.ide.engine.Engine.root(ctx), "agent")
+            dir.mkdirs()
+            java.io.File(dir, "conversations.json").writeText(arr.toString())
+        }
+    }
+
+    /** 启动时从磁盘读回往期对话 */
+    fun loadConversations(ctx: android.content.Context) {
+        if (conversations.isNotEmpty()) return
+        runCatching {
+            val f = java.io.File(candy.ide.engine.Engine.root(ctx), "agent/conversations.json")
+            if (!f.isFile) return@runCatching
+            val arr = org.json.JSONArray(f.readText())
+            for (i in 0 until arr.length()) {
+                val j = arr.getJSONObject(i)
+                val msgs = j.getJSONArray("messages")
+                val list = mutableListOf<ChatMessage>()
+                for (k in 0 until msgs.length()) {
+                    val mo = msgs.getJSONObject(k)
+                    val role = runCatching { ChatMessage.Role.valueOf(mo.getString("role")) }.getOrDefault(ChatMessage.Role.MODEL)
+                    list.add(ChatMessage(role, mo.getString("text")))
+                }
+                if (list.isNotEmpty()) conversations.add(AgentConversation(j.getLong("time"), j.optString("title"), list))
             }
         }
     }

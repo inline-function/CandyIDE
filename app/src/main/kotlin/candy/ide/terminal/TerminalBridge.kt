@@ -20,31 +20,39 @@ object TerminalBridge {
     const val RELAY_DIR = "/sdcard/Download/.candy_term"
     const val OUT_FILE = "$RELAY_DIR/out.txt"
 
-    enum class Channel { SHIZUKU, TERMUX, NONE }
+    enum class Channel { SHIZUKU, TERMUX, TERMUX_UNSUITABLE, NONE }
 
     data class Result(val channel: Channel, val output: String)
 
-    /** 执行一条命令：优先 Shizuku，其次 Termux，都不行返回提示 */
-    fun exec(ctx: Context, cmd: String): Result {
+    /** 执行一条命令：优先 Shizuku，其次 Termux，都不行返回提示。[cwd] 指定工作目录 */
+    fun exec(ctx: Context, cmd: String, cwd: String? = null): Result {
         val trimmed = cmd.trim()
         if (trimmed.isEmpty()) return Result(Channel.NONE, "")
         // 1) Shizuku
         if (ShizukuShell.exec(arrayOf("sh", "-c", "echo ok")) != null) {
-            val out = ShizukuShell.exec(arrayOf("sh", "-c", trimmed)) ?: "（无输出）"
+            val full = if (cwd != null) "cd \"" + cwd + "\" && " + trimmed else trimmed
+            val out = ShizukuShell.exec(arrayOf("sh", "-c", full)) ?: "（无输出）"
             return Result(Channel.SHIZUKU, out)
         }
         // 2) Termux RUN_COMMAND：把命令包成脚本，输出重定向到中转文件
         if (isTermuxInstalled(ctx)) {
+            if (!hasRunCommandGrant(ctx)) return Result(Channel.TERMUX_UNSUITABLE,
+                "Termux 未授予 RUN_COMMAND 权限\n请在 系统设置→应用→CandyIDE→权限 里授予，或改用 Shizuku")
+
             val relay = File(RELAY_DIR)
             relay.mkdirs()
             File("$RELAY_DIR/cmd.sh").writeText(
-                "#!/system/bin/sh\ncd $RELAY_DIR && $trimmed > out.txt 2>&1\n",
+                buildString {
+                    append("#!/system/bin/sh\n")
+                    if (cwd != null) append("cd \"\"" + cwd + "\"\" && \n")
+                    append(trimmed).append(" > out.txt 2>&1\n")
+                },
             )
             val intent = Intent("com.termux.RUN_COMMAND").apply {
                 setClassName("com.termux", "com.termux.app.RunCommandService")
                 putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh")
                 putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("$RELAY_DIR/cmd.sh"))
-                putExtra("com.termux.RUN_COMMAND_WORKDIR", RELAY_DIR)
+                putExtra("com.termux.RUN_COMMAND_WORKDIR", cwd ?: RELAY_DIR)
                 putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
             }
             val sent = runCatching { ctx.startService(intent); true }.getOrElse { false }
@@ -62,6 +70,12 @@ object TerminalBridge {
         f.delete()
         return txt
     }
+
+    /** CandyIDE 是否已被授予 Termux RUN_COMMAND（dangerous 级运行时权限） */
+    fun hasRunCommandGrant(ctx: Context): Boolean = runCatching {
+        ctx.checkSelfPermission("com.termux.permission.RUN_COMMAND") ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
 
     fun isTermuxInstalled(ctx: Context): Boolean = runCatching {
         ctx.packageManager.getPackageInfo("com.termux", 0)

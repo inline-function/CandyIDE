@@ -54,6 +54,8 @@ import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
 
 private val ErrorColor = Color(0xFFFF5C8A)
 private val WarnColor = Color(0xFFFFC857)
+private val InfoColor = Color(0xFF6FB7FF)
+private val HintColor = Color(0xFF9A97A6)
 
 /**
  * 右抽屉：输出 / 日志 / 诊断 三页签。
@@ -100,9 +102,10 @@ fun OutputDrawer(modifier: Modifier, vm: CandyViewModel, onGoto: (DiagItem) -> U
                     val visible = remember(vm.logLines.toList(), filter) {
                         vm.logLines.filter { line ->
                             when (logLevelOf(line)) {
-                                2 -> filter.error
-                                1 -> filter.warn
-                                else -> filter.info
+                                1 -> filter.error
+                                2 -> filter.warn
+                                3 -> filter.info
+                                else -> filter.hint
                             }
                         }
                     }
@@ -111,7 +114,7 @@ fun OutputDrawer(modifier: Modifier, vm: CandyViewModel, onGoto: (DiagItem) -> U
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val active = !(filter.info && filter.warn && filter.error)
+                            val active = !(filter.error && filter.warn && filter.info && filter.hint)
                             TextButton(onClick = { showFilter = true }) {
                                 Text(if (active) "等级过滤 ·" else "等级过滤", color = if (active) CandyPrimary else CandyTextDim, fontSize = 12.sp)
                             }
@@ -126,9 +129,10 @@ fun OutputDrawer(modifier: Modifier, vm: CandyViewModel, onGoto: (DiagItem) -> U
                             title = { Text("日志等级") },
                             text = {
                                 Column {
-                                    FilterRow("信息", filter.info) { vm.logFilter.value = filter.copy(info = it) }
-                                    FilterRow("警告", filter.warn) { vm.logFilter.value = filter.copy(warn = it) }
                                     FilterRow("错误", filter.error) { vm.logFilter.value = filter.copy(error = it) }
+                                    FilterRow("警告", filter.warn) { vm.logFilter.value = filter.copy(warn = it) }
+                                    FilterRow("提示", filter.info) { vm.logFilter.value = filter.copy(info = it) }
+                                    FilterRow("补充", filter.hint) { vm.logFilter.value = filter.copy(hint = it) }
                                 }
                             },
                             confirmButton = {
@@ -143,7 +147,51 @@ fun OutputDrawer(modifier: Modifier, vm: CandyViewModel, onGoto: (DiagItem) -> U
                         )
                     }
                 }
-                else -> DiagList(vm, diags, onGoto)
+                else -> {
+                // 诊断等级过滤：错误 / 警告 / 提示 / 补充（对应 LSP 四档）
+                var showDiagFilter by remember { mutableStateOf(false) }
+                val dfilter = vm.diagFilter.value
+                val visible = remember(diags.toList(), dfilter) {
+                    diags.filter { d -> dfilter.accepts(d) }
+                }
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val active = !(dfilter.error && dfilter.warn && dfilter.info && dfilter.hint)
+                        TextButton(onClick = { showDiagFilter = true }) {
+                            Text(if (active) "等级过滤 ·" else "等级过滤", color = if (active) CandyPrimary else CandyTextDim, fontSize = 12.sp)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text(visible.size.toString() + " 条", color = CandyTextDim, fontSize = 11.sp)
+                    }
+                    DiagList(vm, visible, onGoto)
+                }
+                if (showDiagFilter) {
+                    AlertDialog(
+                        onDismissRequest = { showDiagFilter = false },
+                        title = { Text("诊断等级") },
+                        text = {
+                            Column {
+                                FilterRow("错误", dfilter.error) { vm.diagFilter.value = dfilter.copy(error = it) }
+                                FilterRow("警告", dfilter.warn) { vm.diagFilter.value = dfilter.copy(warn = it) }
+                                FilterRow("提示", dfilter.info) { vm.diagFilter.value = dfilter.copy(info = it) }
+                                FilterRow("补充", dfilter.hint) { vm.diagFilter.value = dfilter.copy(hint = it) }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showDiagFilter = false }) { Text("完成") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                vm.diagFilter.value = DiagFilter()
+                                showDiagFilter = false
+                            }) { Text("全显") }
+                        },
+                    )
+                }
+            }
             }
         }
     }
@@ -262,10 +310,11 @@ private fun DiagList(vm: CandyViewModel, diags: List<DiagItem>, onGoto: (DiagIte
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                val dot = when (d.severity) {
-                    DiagnosticRegion.SEVERITY_ERROR -> ErrorColor
-                    DiagnosticRegion.SEVERITY_WARNING -> WarnColor
-                    else -> CandyTextDim
+                val dot = when (d.level()) {
+                    1 -> ErrorColor
+                    2 -> WarnColor
+                    3 -> InfoColor
+                    else -> HintColor
                 }
                 Box(
                     modifier = Modifier
@@ -302,18 +351,43 @@ private fun Empty(text: String) {
     }
 }
 
+/** 诊断等级过滤状态（全显 = 四个都 true） */
+data class DiagFilter(
+    val error: Boolean = true,
+    val warn: Boolean = true,
+    val info: Boolean = true,
+    val hint: Boolean = true,
+) {
+    fun accepts(d: DiagItem): Boolean = when (d.level()) {
+        1 -> error
+        2 -> warn
+        3 -> info
+        else -> hint
+    }
+}
+
+/** DiagItem 的四等级（1 错误 / 2 警告 / 3 提示 / 4 补充），由 sora severity 常量反映射 */
+fun DiagItem.level(): Int = when (severity) {
+    DiagnosticRegion.SEVERITY_ERROR -> 1
+    DiagnosticRegion.SEVERITY_WARNING -> 2
+    DiagnosticRegion.SEVERITY_TYPO -> 3
+    else -> 4
+}
+
 /** 日志等级过滤状态（全显 = 三个都 true） */
 data class LogFilter(
-    val info: Boolean = true,
-    val warn: Boolean = true,
     val error: Boolean = true,
+    val warn: Boolean = true,
+    val info: Boolean = true,
+    val hint: Boolean = true,
 )
 
-/** 判定一行日志的等级：错误 > 警告 > 信息 */
+/** 判定一行日志的等级：4=补充 3=提示 2=警告 1=错误（与诊断四档一致） */
 private fun logLevelOf(line: String): Int = when {
-    line.contains("**[错误]**") || line.contains("**[失败]") || line.contains("失败]**") -> 2
-    line.contains("**[警告]**") || line.contains("警告") -> 1
-    else -> 0
+    line.contains("**[错误]") || line.contains("**[失败]") || line.contains("失败]") || line.contains("失败**") -> 1
+    line.contains("**[警告]") || line.contains("警告") -> 2
+    line.contains("**[提示]") || line.contains("**[补充]") -> if (line.contains("**[补充]")) 4 else 3
+    else -> 4
 }
 
 @Composable

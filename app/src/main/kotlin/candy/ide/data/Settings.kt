@@ -28,6 +28,7 @@ object Settings {
     var agentBaseUrl by mutableStateOf("https://discovery-api.intern-ai.org.cn/v1")
     var agentModel by mutableStateOf("Atria-Dawn-Preview")
     var agentKey by mutableStateOf("sk-fc709e80739f2ed067823f527cdedc560550948f9f7d70b7743beef5ad4e4f64")
+    var agentPrompt by mutableStateOf("")   // 初始提示词；空则用内置默认
 
     /** 首次拿到 Context 后加载；同时把当前配色方案从磁盘恢复 */
     fun attach(ctx: Context) {
@@ -48,6 +49,7 @@ object Settings {
                 props.getProperty("agentModel")?.let { if (it.isNotBlank()) agentModel = it }
                 props.getProperty("agentKey")?.let { if (it.isNotBlank()) agentKey = it }
                 agentEnabled = props.getProperty("agentEnabled") == "true"
+    props.getProperty("agentPrompt")?.let { agentPrompt = it }
             }
         }
         Schemes.current = Schemes.byId(ctx, schemeId)
@@ -67,6 +69,7 @@ object Settings {
                 setProperty("agentModel", agentModel)
                 setProperty("agentKey", agentKey)
                 setProperty("agentEnabled", agentEnabled.toString())
+    setProperty("agentPrompt", agentPrompt)
             }
             props.store(f.outputStream(), "CandyIDE settings")
         }
