@@ -307,7 +307,7 @@ fun EditorScreen(vm: CandyViewModel) {
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.List,
-                                    contentDescription = "输出/日志/诊断（长按打开终端）[V7]",
+                                    contentDescription = "输出/日志/诊断（长按打开终端）",
                                     tint = if (logOpen) CandyPrimary else CandyText)
                             }
                             var moreMenu by remember { mutableStateOf(false) }
