@@ -578,6 +578,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 val j = org.json.JSONObject()
                     .put("time", c.time)
                     .put("title", c.title)
+                    .put("pinned", c.pinned)
                 val msgs = org.json.JSONArray()
                 for (m in c.messages.takeLast(80)) msgs.put(org.json.JSONObject().put("role", m.role.name).put("text", m.text))
                 j.put("messages", msgs)
@@ -605,7 +606,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     val role = runCatching { ChatMessage.Role.valueOf(mo.getString("role")) }.getOrDefault(ChatMessage.Role.MODEL)
                     list.add(ChatMessage(role, mo.getString("text")))
                 }
-                if (list.isNotEmpty()) conversations.add(AgentConversation(j.getLong("time"), j.optString("title"), list))
+                if (list.isNotEmpty()) conversations.add(AgentConversation(j.getLong("time"), j.optString("title", ""), list, j.optBoolean("pinned", false)))
             }
         }
     }

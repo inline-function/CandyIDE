@@ -31,6 +31,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 
@@ -608,7 +612,6 @@ fun EditorScreen(vm: CandyViewModel) {
                             val word = quickWord
                             Surface(
                                 modifier = Modifier
-                                    .width(200.dp)
                                     .offset {
                                         IntOffset(
                                             (menu.x.roundToInt() - 8).coerceAtLeast(0),
@@ -619,14 +622,22 @@ fun EditorScreen(vm: CandyViewModel) {
                                 color = CandySurface,
                                 shadowElevation = 8.dp,
                             ) {
-                                Column {
-                                    val ed3 = editor
-                                    LongMenuRow("全选文本") { quickMenu = null; ed3?.selectAll() }
-                                    LongMenuRow("复制文本") { quickMenu = null; ed3?.copyText() }
-                                    // 只读工程（md 文档工程 / 内置工程）：禁止剪切与粘贴
+                                // 一排图标（只读工程不含剪切/粘贴）
+                                val ed3 = editor
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { quickMenu = null; ed3?.selectAll() }) {
+                                        Icon(Icons.Default.SelectAll, contentDescription = "全选", tint = CandyText, modifier = Modifier.size(18.dp))
+                                    }
+                                    IconButton(onClick = { quickMenu = null; ed3?.copyText() }) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "复制", tint = CandyText, modifier = Modifier.size(18.dp))
+                                    }
                                     if (!isMdProject) {
-                                        LongMenuRow("剪切文本") { quickMenu = null; ed3?.cutText() }
-                                        LongMenuRow("粘贴文本") { quickMenu = null; ed3?.pasteText() }
+                                        IconButton(onClick = { quickMenu = null; ed3?.cutText() }) {
+                                            Icon(Icons.Default.ContentCut, contentDescription = "剪切", tint = CandyText, modifier = Modifier.size(18.dp))
+                                        }
+                                        IconButton(onClick = { quickMenu = null; ed3?.pasteText() }) {
+                                            Icon(Icons.Default.ContentPaste, contentDescription = "粘贴", tint = CandyText, modifier = Modifier.size(18.dp))
+                                        }
                                     }
                                 }
                             }

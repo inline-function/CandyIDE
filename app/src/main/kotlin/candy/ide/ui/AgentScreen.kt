@@ -19,9 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,7 +40,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -68,11 +74,79 @@ fun AgentScreen(vm: CandyViewModel) {
         if (vm.chat.isNotEmpty()) listState.animateScrollToItem(vm.chat.size - 1)
     }
 
-    var showHistory by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
+    // 输入框附件：文件（SAF）/ 图片（相册）选择
+    var attachPicker by remember { mutableStateOf(false) }
+    val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val name = runCatching { ctx.contentResolver.query(uri, null, null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(c.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)) else null } }
+                .getOrNull() ?: uri.lastPathSegment ?: "文件"
+            val cur = input.trim()
+            input = if (cur.isEmpty()) "看一下 $name" else cur + "\n看一下 $name"
+        }
+        attachPicker = false
+    }
+    val pickImage = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) {
+            val cur = input.trim()
+            val tag = "[图片]"
+            input = if (cur.isEmpty()) tag else cur + "\n" + tag
+        }
+        attachPicker = false
+    }
+    // 往期对话右侧抽屉
+    val drawerState = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // 抽屉内行内操作：重命名 / 删除 / 置顶（确认弹窗）
+    var renameConv by remember { mutableStateOf<candy.ide.vm.AgentConversation?>(null) }
+    var deleteConv by remember { mutableStateOf<candy.ide.vm.AgentConversation?>(null) }
 
-    BackHandler { vm.screen.value = Screen.Editor }
+    BackHandler {
+        // 抽屉开着先关抽屉，否则退出助手页
+        if (drawerState.isOpen) scope.launch { drawerState.close() } else vm.screen.value = Screen.Editor
+    }
 
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            androidx.compose.material3.ModalDrawerSheet {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("往期对话", color = CandyText, style = androidx.compose.material3.MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    androidx.compose.material3.IconButton(onClick = {
+                        scope.launch { drawerState.close() }
+                        vm.newAgentChat(ctx)
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = "新建会话", tint = CandySecondary)
+                    }
+                }
+                androidx.compose.material3.HorizontalDivider(color = CandySurfaceVariant)
+                if (vm.conversations.isEmpty()) {
+                    Text("还没有存档的对话", color = CandyTextDim, modifier = Modifier.padding(16.dp))
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                        items(vm.conversations.sortedByDescending { it.pinned }) { conv ->
+                            ConversationRow(
+                                vm = vm,
+                                ctx = ctx,
+                                conv = conv,
+                                onOpen = { scope.launch { drawerState.close() }; vm.restoreConversation(ctx, conv) },
+                                onRename = { renameConv = conv },
+                                onDelete = { deleteConv = conv },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    ) {
     androidx.compose.material3.Scaffold(
         containerColor = CandyBg,
         topBar = {
@@ -91,7 +165,7 @@ fun AgentScreen(vm: CandyViewModel) {
                     Text(agentStatusLabel(vm.agentStage.value), color = CandyPrimary, fontSize = 11.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { showHistory = true }) {
+                IconButton(onClick = { scope.launch { drawerState.open() } }) {
                     Icon(Icons.Default.History, contentDescription = "往期对话", tint = CandySecondary)
                 }
                 IconButton(onClick = { vm.newAgentChat(ctx) }) {
@@ -135,6 +209,10 @@ fun AgentScreen(vm: CandyViewModel) {
                 modifier = Modifier.fillMaxWidth().padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 附件（文件 / 图片）：点开选择方式
+                IconButton(onClick = { attachPicker = true }, enabled = !sending) {
+                    Icon(Icons.Default.AttachFile, contentDescription = "添加附件", tint = CandyTextDim)
+                }
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
@@ -169,35 +247,68 @@ fun AgentScreen(vm: CandyViewModel) {
             Spacer(Modifier.size(2.dp))
         }
     }
-
-    // 往期对话
-    if (showHistory) {
+    }
+    // 附件选择：文件（SAF）/ 图片（相册）
+    if (attachPicker) {
         AlertDialog(
-            onDismissRequest = { showHistory = false },
-            title = { Text("往期对话") },
-            text = {
-                if (vm.conversations.isEmpty()) {
-                    Text("还没有存档的对话", color = CandyTextDim)
-                } else {
-                    Column {
-                        vm.conversations.forEach { conv ->
-                            val title = conv.title.ifBlank { "对话" }
-                            val time = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA).format(java.util.Date(conv.time))
-                            Surface(
-                                color = CandySurface,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                                onClick = { showHistory = false; vm.restoreConversation(ctx, conv) },
-                            ) {
-                                Column(Modifier.padding(8.dp)) {
-                                    Text(title, color = CandyText, fontSize = 13.sp, maxLines = 1)
-                                    Text(time + " · " + conv.messages.size + " 条", color = CandyTextDim, fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
+            onDismissRequest = { attachPicker = false },
+            title = { Text("添加附件") },
+            text = { Text("选择要发给助手的文件或图片（文件路径会填入输入框）") },
+            confirmButton = {
+                TextButton(onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("选择文件") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { pickImage.launch("image/*") }) { Text("相册图片") }
+                    TextButton(onClick = { attachPicker = false }) { Text("取消") }
                 }
             },
-            confirmButton = { TextButton(onClick = { showHistory = false }) { Text("关闭") } },
+        )
+    }
+
+    // 重命名会话
+    renameConv?.let { conv ->
+        var name by remember(conv) { androidx.compose.runtime.mutableStateOf(conv.title) }
+        AlertDialog(
+            onDismissRequest = { renameConv = null },
+            title = { Text("重命名会话") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("会话标题") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = name.trim()
+                    if (n.isNotEmpty()) {
+                        val i = vm.conversations.indexOf(conv)
+                        if (i >= 0) vm.conversations[i] = conv.copy(title = n)
+                        vm.saveConversations(ctx)
+                    }
+                    renameConv = null
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { renameConv = null }) { Text("取消") } },
+        )
+    }
+
+    // 删除会话确认
+    deleteConv?.let { conv ->
+        AlertDialog(
+            onDismissRequest = { deleteConv = null },
+            title = { Text("删除会话") },
+            text = { Text("删除「" + conv.title.ifBlank { "对话" } + "」？" + conv.messages.size + " 条消息将无法恢复") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.conversations.remove(conv)
+                    vm.saveConversations(ctx)
+                    deleteConv = null
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { deleteConv = null }) { Text("取消") } },
         )
     }
 
@@ -301,5 +412,54 @@ private fun agentStatusLabel(stage: String): String {
         "write_current_file" -> "编辑中"
         "run_shell" -> "操作中"
         else -> "思考中"
+    }
+}
+
+/** 往期对话抽屉行：标题/时间+消息数，行内 置顶/重命名/删除 */
+@Composable
+private fun ConversationRow(
+    vm: CandyViewModel,
+    ctx: android.content.Context,
+    conv: candy.ide.vm.AgentConversation,
+    onOpen: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val time = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA).format(java.util.Date(conv.time))
+    androidx.compose.material3.Surface(
+        color = if (conv.pinned) candy.ide.ui.theme.CandySurfaceVariant else candy.ide.ui.theme.CandySurface,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        onClick = onOpen,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    (if (conv.pinned) "★ " else "") + conv.title.ifBlank { "对话" },
+                    color = candy.ide.ui.theme.CandyText,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Text(time + " · " + conv.messages.size + " 条", color = candy.ide.ui.theme.CandyTextDim, fontSize = 11.sp)
+            }
+            androidx.compose.material3.IconButton(onClick = {
+                conv.pinned = !conv.pinned
+                vm.saveConversations(ctx)
+                // 元素内字段改动不触发列表重组：挪动一下让 Snapshot 刷新顺序
+                val i = vm.conversations.indexOf(conv)
+                if (i >= 0) { vm.conversations.removeAt(i); vm.conversations.add(i, conv) }
+            }) {
+                Icon(Icons.Default.Star, contentDescription = "置顶", tint = if (conv.pinned) candy.ide.ui.theme.CandySecondary else candy.ide.ui.theme.CandyTextDim)
+            }
+            androidx.compose.material3.IconButton(onClick = onRename) {
+                Icon(Icons.Default.Edit, contentDescription = "重命名", tint = candy.ide.ui.theme.CandyTextDim)
+            }
+            androidx.compose.material3.IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "删除", tint = candy.ide.ui.theme.CandyTextDim)
+            }
+        }
     }
 }

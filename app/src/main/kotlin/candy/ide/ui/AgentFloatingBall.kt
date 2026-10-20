@@ -15,8 +15,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -243,27 +248,60 @@ private fun MiniChatWindow(
         Spacer(Modifier.size(6.dp))
         // 输入行
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                enabled = !sending,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = {
-                    val text = input.trim()
-                    if (text.isNotEmpty() && !sending) {
-                        input = ""
-                        vm.askAgent(ctx, text)
+            // 自绘输入框：Material TextField 的默认内边距在悬浮窗里太大，
+            // 直接用 BasicTextField 控制内边距与高度（26dp 贴合悬浮窗比例）
+            // 原生 EditText：Compose TextField 的最小高度（48dp）在悬浮窗里太大，
+            // 直接用 AndroidView 精确控制 28dp 高度与内边距，避免文字被裁
+            androidx.compose.ui.viewinterop.AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth(0.72f)
+                    .height(28.dp),
+                factory = { c ->
+                    object : android.widget.EditText(c) {
+                        override fun onTextContextMenuItem(id: Int): Boolean = false
+                    }.apply {
+                        setBackground(null)
+                        setPadding(0, 0, 0, 0)
+                        textSize = 11f
+                        setTextColor(android.graphics.Color.WHITE)
+                        setHintTextColor(android.graphics.Color.parseColor("#7A6CA8"))
+                        hint = "消息…"
+                        maxLines = 1
+                        inputType = android.text.InputType.TYPE_CLASS_TEXT
+                        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                        setOnEditorActionListener { _, actionId, _ ->
+                            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                                val text = text.toString().trim()
+                                val st = vm.agentBusy.value
+                                if (text.isNotEmpty() && !st) {
+                                    setText("")
+                                    vm.askAgent(c, text)
+                                }
+                            }
+                            true
+                        }
+                        addTextChangedListener(object : android.text.TextWatcher {
+                            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                            override fun afterTextChanged(s: android.text.Editable?) {
+                                val v = s?.toString() ?: ""
+                                if (v != input) input = v
+                            }
+                        })
                     }
-                }),
-                placeholder = { Text("消息…", color = FloatDim, fontSize = 10.sp) },
-                textStyle = TextStyle(color = Color.White, fontSize = 11.sp),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(10.dp),
+                },
+                update = { et ->
+                    if (et.text.toString() != input) {
+                        et.keepScreenOn = true
+                        et.setText(input)
+                        et.setSelection(input.length)
+                    }
+                },
             )
             Spacer(Modifier.size(6.dp))
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(26.dp)
                     .clip(CircleShape)
                     .background(BubbleColor)
                     .clickable {

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import candy.ide.data.Settings
@@ -394,12 +396,19 @@ fun SettingsScreen(vm: CandyViewModel) {
                     Spacer(Modifier.size(8.dp))
                     // 无障碍权限：agent 后续操作 IDE 界面要用
                     var a11yOn by remember { mutableStateOf(isAccessibilityEnabled(ctx)) }
-                    Surface(color = CandySurface, onClick = {
-                        ctx.startActivity("".let {
-                            val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            intent
-                        })
-                    }) {
+                    // 从系统设置返回时刷新开关状态
+                    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+                        val observer = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                a11yOn = isAccessibilityEnabled(ctx)
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    }
+                    var showA11yHelp by remember { mutableStateOf(false) }
+                    Surface(color = CandySurface, onClick = { showA11yHelp = true }) {
                         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("无障碍权限", color = CandyText)
@@ -409,13 +418,37 @@ fun SettingsScreen(vm: CandyViewModel) {
                                     color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
                                 )
                             }
-                            Switch(checked = a11yOn, onCheckedChange = {
-                                ctx.startActivity("".let {
-                                    val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    intent
-                                })
-                            })
+                            Switch(checked = a11yOn, onCheckedChange = { showA11yHelp = true })
                         }
+                    }
+                    if (showA11yHelp) {
+                        AlertDialog(
+                            onDismissRequest = { showA11yHelp = false },
+                            title = { Text("开启 CandyIDE 无障碍服务") },
+                            text = {
+                                Column {
+                                    Text("这是 CandyIDE 自己的无障碍服务（不是系统的辅助功能），开启步骤：", color = CandyText, fontSize = 13.sp)
+                                    Spacer(Modifier.size(6.dp))
+                                    Text("1. 点「打开系统设置」进入无障碍页\n2. 找到 CandyIDE 的服务条目（通常在「已下载的服务」/「高级」里）\n3. 打开开关并确认授权\n4. 返回 IDE，状态会自动刷新", color = CandyTextDim, fontSize = 12.sp)
+                                    if (a11yOn) {
+                                        Spacer(Modifier.size(6.dp))
+                                        Text("当前状态：已开启", color = CandyPrimary, fontSize = 12.sp)
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showA11yHelp = false
+                                    openCandyA11ySettings(ctx)
+                                }) { Text("打开系统设置") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = {
+                                    showA11yHelp = false
+                                    a11yOn = isAccessibilityEnabled(ctx)
+                                }) { Text("返回并刷新状态") }
+                            },
+                        )
                     }
                     Spacer(Modifier.size(8.dp))
                 }
@@ -546,4 +579,14 @@ private fun isAccessibilityEnabled(ctx: android.content.Context): Boolean {
         ) ?: return@runCatching false
         list.contains(ctx.packageName)
     }.getOrDefault(false)
+}
+
+/** 打开系统无障碍设置；CandyIDE 自己的服务条目通常在「已下载的服务」/「高级」里。 */
+private fun openCandyA11ySettings(ctx: android.content.Context) {
+    runCatching {
+        ctx.startActivity(
+            android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
 }
