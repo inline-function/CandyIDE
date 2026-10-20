@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import candy.ide.data.DiagItem
 import candy.ide.data.ProjectStore
 import candy.ide.data.Settings
@@ -458,14 +459,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     /** 问 agent 一句；事件流逐条落进 chat */
     fun askAgent(ctx: android.content.Context, text: String) {
         if (agentBusy.value) return
-        if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext).also {
-            it.tools.currentFile = currentFile.value?.absolutePath
-            it.tools.currentProjectDir = currentProject.value
-            it.tools.diagnostics = diagnostics.toList()
-        } else {
-            it.tools.diagnostics = diagnostics.toList()
-            it.tools.currentFile = currentFile.value?.absolutePath
-            it.tools.currentProjectDir = currentProject.value
+        if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext)
+        agent!!.apply {
+            tools.currentFile = currentFile.value?.absolutePath
+            tools.currentProjectDir = currentProject.value
+            tools.diagnostics = diagnostics.toList()
         }
         chat.add(ChatMessage(ChatMessage.Role.USER, text))
         agentBusy.value = true
