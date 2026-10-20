@@ -347,6 +347,7 @@ fun SettingsScreen(vm: CandyViewModel) {
                             checked = agentEnabled,
                             onCheckedChange = {
                                 agentEnabled = it
+                                Settings.agentEnabled = it
                                 Settings.persist(ctx)
                             },
                         )

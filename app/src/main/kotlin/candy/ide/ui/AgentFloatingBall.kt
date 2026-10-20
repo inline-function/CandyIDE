@@ -3,6 +3,8 @@ package candy.ide.ui
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,7 +66,9 @@ private val FloatDim = Color(0xFF9A97A6)
  */
 @Composable
 fun AgentFloatingBall(vm: CandyViewModel) {
-    if (!Settings.agentEnabled) return
+    // 订阅 Settings 的可观察状态：开关一变（即便 attach 晚于组合）也会重组
+    val enabled by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { Settings.agentEnabled } }
+    if (!enabled) return
     val ctx = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var offsetX by remember { mutableStateOf(0f) }
@@ -76,7 +80,8 @@ fun AgentFloatingBall(vm: CandyViewModel) {
             // 收起态：悬浮小球
             Box(
                 modifier = Modifier
-                    .offset { androidx.compose.ui.unit.IntOffset(offsetX.toInt(), offsetY.toInt()) }
+                    .align(Alignment.BottomEnd)
+                    .offset { androidx.compose.ui.unit.IntOffset(offsetX.toInt(), -offsetY.toInt()) }
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(BubbleColor.copy(alpha = 0.9f))
@@ -89,7 +94,7 @@ fun AgentFloatingBall(vm: CandyViewModel) {
                                     PointerEventType.Move -> {
                                         val change = e.changes.first()
                                         offsetX += change.position.x - change.previousPosition.x
-                                        offsetY += change.position.y - change.previousPosition.y
+                                        offsetY -= change.position.y - change.previousPosition.y
                                         change.consume()
                                         dragging = true
                                     }
@@ -106,15 +111,21 @@ fun AgentFloatingBall(vm: CandyViewModel) {
                     Icon(Icons.Default.SmartToy, contentDescription = "AI 助手", tint = Color.White, modifier = Modifier.size(26.dp))
                 }
         } else {
-            // 展开态：迷你聊天窗（固定在右上偏下）
-            MiniChatWindow(
+            // 展开态：迷你聊天窗（贴右下，避开输入法）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .imePadding(),
+            ) {
+                MiniChatWindow(
                 vm = vm,
                 onFullScreen = {
                     expanded = false
                     vm.screen.value = Screen.Agent
                 },
                 onClose = { expanded = false },
-            )
+                )
+            }
         }
     }
 }
@@ -182,6 +193,14 @@ private fun MiniChatWindow(
                 value = input,
                 onValueChange = { input = it },
                 enabled = !sending,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = {
+                    val text = input.trim()
+                    if (text.isNotEmpty() && !sending) {
+                        input = ""
+                        vm.askAgent(ctx, text)
+                    }
+                }),
                 placeholder = { Text("消息…", color = FloatDim, fontSize = 12.sp) },
                 textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
                 modifier = Modifier.weight(1f),
@@ -190,7 +209,7 @@ private fun MiniChatWindow(
             Spacer(Modifier.size(6.dp))
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(BubbleColor)
                     .clickable {

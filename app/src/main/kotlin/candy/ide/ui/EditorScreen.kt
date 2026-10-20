@@ -16,13 +16,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -307,7 +307,7 @@ fun EditorScreen(vm: CandyViewModel) {
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.List,
-                                    contentDescription = "输出/日志/诊断（长按打开终端）",
+                                    contentDescription = "输出/日志/诊断（长按打开终端）[V7]",
                                     tint = if (logOpen) CandyPrimary else CandyText)
                             }
                             var moreMenu by remember { mutableStateOf(false) }
@@ -729,6 +729,8 @@ fun EditorScreen(vm: CandyViewModel) {
                     drawerClose = { scope.launch { drawerState.close() } },
                 )
             }
+        // AI agent 悬浮球（设置里 agentEnabled=true 才出现；Box 内最后声明 → 最上层）
+        AgentFloatingBall(vm)
                     }
 
     // 控制台输入框：程序 readLine 时 JS 线程在等这个结果
@@ -974,8 +976,6 @@ fun EditorScreen(vm: CandyViewModel) {
             },
             dismissButton = { TextButton(onClick = { renameReq = null }) { Text("取消") } },
         )
-        // AI agent 悬浮球（设置里 agentEnabled=true 时才出现；放最后保证不被 Scaffold 遮）
-        AgentFloatingBall(vm)
     }
 }
 
