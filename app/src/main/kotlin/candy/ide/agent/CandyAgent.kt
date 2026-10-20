@@ -45,7 +45,6 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
 你可用工具读当前文件、执行 shell 命令、获取编译诊断。不确定就明说，别编造 API。
 """ + tools.toolDescriptions()
 
-" + tools.toolDescriptions()
 
     init {
         // ADK session：appName=candy.ide，userId=local，sessionId 固定（单用户 IDE）
@@ -118,12 +117,12 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
         }
     }
 
+
+    companion object {
     private fun toolText(name: String, args: Map<String, Any?>, result: String): String {
         val argStr = args.entries.joinToString(", ") { entry -> entry.key.toString() + "=" + entry.value }
         return "[工具 " + name + "] " + argStr + "\n" + result
     }
-
-    companion object {
         fun eventOf(content: Content, author: String): Event = Event(
             id = java.util.UUID.randomUUID().toString(),
             invocationId = "local",

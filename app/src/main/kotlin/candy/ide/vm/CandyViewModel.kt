@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import candy.ide.data.DiagItem
 import candy.ide.data.ProjectStore
 import candy.ide.data.Settings

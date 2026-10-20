@@ -6,6 +6,16 @@ plugins {
 
 android {
     namespace = "candy.ide"
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/INDEX.LIST",
+                "META-INF/io.netty.versions.properties",
+                "META-INF/DEPENDENCIES",
+            )
+        }
+    }
     compileSdk = 35
 
     defaultConfig {
