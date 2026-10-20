@@ -6,6 +6,7 @@ import android.view.inputmethod.InputMethodManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,6 +57,8 @@ fun SoraEditorView(
     var editor by remember { mutableStateOf<CodeEditor?>(null) }
     var layoutInstalled by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf<File?>(null) }
+    // 外部修改同步（黄条「同步」）：由_nonce 递增触发强制重读磁盘
+    var reloadKey by remember { mutableIntStateOf(0) }
     val ctx = LocalContext.current
 
     // 读一次 State：这几个键变化会触发 update 重跑
@@ -203,8 +206,9 @@ fun SoraEditorView(
             FontManager.typeface(ctx, fontId)?.let { ed.setTypefaceText(it) }
             ed.setTextSize(fontSize.toFloat())
             ed.isWordwrap = wordWrap
-            if (loaded != file) {
+            if (loaded != file || vm.forceReloadNonce.intValue != reloadKey) {
                 loaded = file
+                reloadKey = vm.forceReloadNonce.intValue
                 val text = if (file == null) "" else runCatching { textProvider(file) }.getOrDefault("")
                 ed.setText(text)
             }

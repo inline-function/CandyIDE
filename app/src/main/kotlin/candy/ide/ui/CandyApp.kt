@@ -13,10 +13,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import candy.ide.ui.theme.CandyBg
 import candy.ide.ui.theme.CandySurfaceVariant
@@ -52,6 +56,16 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
     }
     LaunchedEffect(Unit) {
         vm.bootstrap()
+    }
+
+    // 活动恢复（从别的 APP/后台回来）：驱动编辑页检测文件是否被外部修改、刷新文件树
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.onResumed()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     when (vm.screen.value) {
         Screen.Projects -> ProjectsScreen(vm)

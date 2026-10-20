@@ -54,6 +54,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     val openFiles = mutableStateListOf<File>()
     val activeIndex = mutableIntStateOf(0)
     val treeVersion = mutableIntStateOf(0)
+    // 页面恢复（ON_RESUME）/ agent 回复完毕：驱动编辑页检测外部修改、重建文件树
+    val resumeNonce = mutableIntStateOf(0)
     // 文件树剪贴板：复制/剪切 → 粘贴到目录
     val clipFile = mutableStateOf<File?>(null)
     var clipCut = false
@@ -62,6 +64,10 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     val mdTextMode = mutableStateMapOf<String, Boolean>()
     // 正文缓存：文件路径 → 上次落盘/载入的正文 + 仍有修改未保存的标记（跨标签页保留正文用）
     private val savedTexts = HashMap<String, String>()
+    // 落盘/载入版本号：编辑器用它同步「已知 mtime」，驱散外部修改黄条
+    val savedTextsVersion = mutableIntStateOf(0)
+    // 强制重载信号：外部修改同步后让 SoraEditorView 丢弃缓存重读磁盘
+    val forceReloadNonce = mutableIntStateOf(0)
     val dirtyTexts = mutableStateMapOf<String, Boolean>()
     val pendingFormatEdits = mutableStateListOf<Pair<Range, String>>()  // 格式化编辑（LSP Range → 新文本）
     // 退出工程确认 / 打包完成待安装
@@ -175,8 +181,15 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             // 双重判定：前缀含本文件名，或位置在文件真实行数内但消息无前缀（推导注记类）。
             // 消息前缀形如「[语法][hello.subl:6:4] …」；stdlib 混入的诊断无此前缀
             val tag = Regex.fromLiteral("[" + name + ":")
+            // 无位置前缀的诊断（E-IMPURE-CALL 等编译器诊断不带「[file:l:c]」前缀）：
+            // 只要 range 落在本文件行数内就收；带前缀的仍按前缀归属本文件判定
             val items = analysis.diagnosticsFor(name)
-                .filter { d -> d.message.contains(tag) }
+                .filter { d ->
+                    // 带本文件名前缀的诊断（lexer note 类）直接收
+                    d.message.contains(tag) ||
+                    // 无前缀的编译器诊断（如 E-IMPURE-CALL）：行号落在文件内即收
+                    (!d.message.contains(Regex.fromLiteral("[")) && d.range.start.line < lineCount)
+                }
                 .map { d ->
                 DiagItem(
                     severity = d.severity.severityShort(),
@@ -359,6 +372,15 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 外部修改同步：丢弃内存正文，强制从磁盘重载（编辑器侧随即重读）。 */
+    fun reloadCurrentFromDisk() {
+        val f = currentFile.value ?: return
+        dirtyTexts.remove(f.absolutePath)
+        savedTexts.remove(f.absolutePath)
+        forceReloadNonce.intValue++
+        mdLogUser("**[同步]** 已用磁盘内容替换 `" + f.name + "`")
+    }
+
     fun selectTab(i: Int) {
         if (i !in openFiles.indices) return
         activeIndex.intValue = i
@@ -500,6 +522,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 agentBusy.value = false
                 agentStage.value = ""
+                // 一轮结束：agent 可能改过文件，通知编辑页重检测外部修改与文件树
+                onAgentTurnDone()
             }
         }
     }
@@ -744,6 +768,18 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 页面恢复：驱动编辑页检测文件外部修改（黄条）并重建文件树。 */
+    fun onResumed() {
+        resumeNonce.intValue++
+        treeVersion.intValue++
+    }
+
+    /** agent 一轮回复完毕：与页面恢复同样需要重检测文件状态。 */
+    fun onAgentTurnDone() {
+        resumeNonce.intValue++
+        treeVersion.intValue++
+    }
+
     fun goBack() {
         screen.value = when (screen.value) {
             // 编辑页长按进来的：工程还开着就回编辑页，否则回主页
@@ -773,6 +809,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 n++
             }
         }
+        if (n > 0) savedTextsVersion.intValue++
         mdLogUser("**[工程保存]** 共保存 " + n + " 个文件")
     }
 
@@ -784,6 +821,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { file.writeText(text) }
                 .onSuccess {
                     runFailed.value = false
+                    main.post { savedTextsVersion.intValue++ }
                     mdLogUser("**[保存]** `" + file.name + "`")
                 }
                 .onFailure { mdLogUser("**[保存失败]** " + (it.message ?: it.javaClass.simpleName)) }

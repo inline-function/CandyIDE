@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -135,9 +136,33 @@ fun EditorScreen(vm: CandyViewModel) {
     var cursorCol by remember { mutableIntStateOf(-1) }
     var editorSize by remember { mutableStateOf(IntSize.Zero) }
     var fixPopup by remember { mutableStateOf(false) }
+    // 外部修改检测：文件签（黄条）—— 文件被外部改动时提示同步或覆盖
+    var externalChange by remember { mutableStateOf<File?>(null) }
+    // 记录每个打开文件最近一次我们这边写盘/载入时的 mtime，用于判断外部改动
+    val knownMtimes = remember { androidx.compose.runtime.mutableStateMapOf<String, Long>() }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
 
     BackHandler { vm.backFromEditor() }
+
+    // 外部修改检测：活动恢复 / agent 回复完毕 / 切换当前文件时，比对磁盘 mtime
+    LaunchedEffect(vm.resumeNonce.intValue, safe) {
+        val f = safe
+        if (f == null) { externalChange = null; return@LaunchedEffect }
+        val known = knownMtimes[f.absolutePath]
+        val disk = runCatching { f.lastModified() }.getOrDefault(0L)
+        when {
+            // 切换文件：先清旧标记（这个 effect 因 safe 变化而重跑）
+            known == null -> { knownMtimes[f.absolutePath] = disk; externalChange = null }
+            // 已知 mtime 且磁盘更新 → 外部修改
+            disk > known && disk > 0 -> externalChange = f
+        }
+    }
+    // 每次 sora 里保存/载入后同步 mtime（由 SoraEditorView 的保存回调驱动）
+    LaunchedEffect(vm.savedTextsVersion.intValue, safe) {
+        val f = safe ?: return@LaunchedEffect
+        runCatching { knownMtimes[f.absolutePath] = f.lastModified() }.getOrNull()
+        externalChange = null
+    }
 
     // 诊断 -> 编辑器下划线：DiagItem 的行列换算成正文偏移，交给 sora 画红/黄波浪线。
     // 只有 Error/Warning 画波浪线；补充级（Hint/Info）只进悬浮窗与诊断页，不画线。
@@ -429,6 +454,34 @@ fun EditorScreen(vm: CandyViewModel) {
                                         }
                                     }
                                 )
+                            }
+                        }
+                    }
+                    // 外部修改提示条：文件被外部改动，点击以磁盘内容重载，或保存覆盖之
+                    val changed = externalChange
+                    if (changed != null && changed == currentFile) {
+                        Surface(color = Color(0xFFFFF3C4), contentColor = Color(0xFF6B4E00)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text(
+                                    "文件已被修改，点击以同步修改，或保存覆盖修改",
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = {
+                                    // 同步：丢弃编辑器正文，重载磁盘内容
+                                    vm.reloadCurrentFromDisk()
+                                    externalChange = null
+                                }) { Text("同步") }
+                                TextButton(onClick = {
+                                    val ed = editor ?: return@TextButton
+                                    vm.saveCurrent(ed.text.toString())
+                                    externalChange = null
+                                }) { Text("覆盖") }
                             }
                         }
                     }
