@@ -447,6 +447,48 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun goScheme() { screen.value = Screen.Scheme }
     fun goDevelopers() { screen.value = Screen.Developers }
+    fun goTerminal() { screen.value = Screen.Terminal }
+    fun goAgent() { screen.value = Screen.Agent }
+
+    // —— AI agent ——
+    val chat = mutableStateListOf<ChatMessage>()
+    val agentBusy = mutableStateOf(false)
+    @Volatile private var agent: candy.ide.agent.CandyAgent? = null
+
+    /** 问 agent 一句；事件流逐条落进 chat */
+    fun askAgent(ctx: android.content.Context, text: String) {
+        if (agentBusy.value) return
+        if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext).also {
+            it.tools.currentFile = currentFile.value?.absolutePath
+            it.tools.currentProjectDir = currentProject.value
+            it.tools.diagnostics = diagnostics.toList()
+        } else {
+            it.tools.diagnostics = diagnostics.toList()
+            it.tools.currentFile = currentFile.value?.absolutePath
+            it.tools.currentProjectDir = currentProject.value
+        }
+        chat.add(ChatMessage(ChatMessage.Role.USER, text))
+        agentBusy.value = true
+        viewModelScope.launch {
+            try {
+                agent!!.ask(text).collect { ev ->
+                    val author = ev.author
+                    val body = ev.content?.parts?.mapNotNull { it.text }?.joinToString("")?.trim() ?: ""
+                    if (body.isBlank()) return@collect
+                    val role = when (author) {
+                        "model" -> ChatMessage.Role.MODEL
+                        "tool" -> ChatMessage.Role.TOOL
+                        else -> ChatMessage.Role.USER
+                    }
+                    chat.add(ChatMessage(role, body))
+                }
+            } catch (e: Exception) {
+                chat.add(ChatMessage(ChatMessage.Role.MODEL, "调用失败：${e.message ?: e.toString()}"))
+            } finally {
+                agentBusy.value = false
+            }
+        }
+    }
 
     /** 在工程内生成自签名 jks 证书；成功返回相对路径，失败返回原因 */
     fun generateCert(project: File, alias: String, pass: String, cn: String, years: Int): String {
@@ -1244,3 +1286,7 @@ print("从 " + name + " 运行")
     }
 }
 
+/** agent 聊天消息 */
+data class ChatMessage(val role: Role, val text: String) {
+    enum class Role { USER, MODEL, TOOL }
+}

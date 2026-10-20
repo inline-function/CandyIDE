@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import candy.ide.data.Settings
 import candy.ide.data.ShizukuManager
+import candy.ide.data.Settings
+import candy.ide.terminal.TerminalBridge
 import candy.ide.editor.Schemes
 import candy.ide.ui.theme.CandyBg
 import candy.ide.ui.theme.CandyPrimary
@@ -63,6 +66,10 @@ fun SettingsScreen(vm: CandyViewModel) {
     val ctx = LocalContext.current
     var schemeMenu by remember { mutableStateOf(false) }
     var shizukuState by remember { mutableStateOf<ShizukuManager.State?>(null) }
+    var agentEnabled by remember { mutableStateOf(Settings.agentEnabled) }
+    var agentUri by remember { mutableStateOf(Settings.agentBaseUrl) }
+    var agentModel by remember { mutableStateOf(Settings.agentModel) }
+    var agentKey by remember { mutableStateOf(Settings.agentKey) }
     var shizukuInfo by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     LaunchedEffect(Unit) {
@@ -271,7 +278,7 @@ fun SettingsScreen(vm: CandyViewModel) {
                             onCheckedChange = {
                                 if (!extGranted) runCatching {
                                     val intent = android.content.Intent(
-                                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",
                                         android.net.Uri.parse("package:" + ctx.packageName),
                                     ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                                     extLauncher.launch(intent)
@@ -322,6 +329,82 @@ fun SettingsScreen(vm: CandyViewModel) {
                             Text("编辑器交互事件；落盘 logs/ide.log（超 1MB 自动截断尾部）", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
                         }
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandyTextDim)
+                    }
+                }
+            }
+            item { SectionTitle("AI agent（ADK）") }
+            item {
+                Surface(color = CandySurface) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("开启 AGENT 支持", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("开启后编辑页出现悬浮球：点开是小聊天窗，可进全屏对话页", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(
+                            checked = agentEnabled,
+                            onCheckedChange = {
+                                agentEnabled = it
+                                Settings.persist(ctx)
+                            },
+                        )
+                    }
+                }
+            }
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    OutlinedTextField(
+                        value = agentUri,
+                        onValueChange = { agentUri = it; Settings.agentBaseUrl = it; Settings.persist(ctx) },
+                        label = { Text("Base URL", color = CandyTextDim) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    OutlinedTextField(
+                        value = agentModel,
+                        onValueChange = { agentModel = it; Settings.agentModel = it; Settings.persist(ctx) },
+                        label = { Text("模型", color = CandyTextDim) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    OutlinedTextField(
+                        value = agentKey,
+                        onValueChange = { agentKey = it; Settings.agentKey = it; Settings.persist(ctx) },
+                        label = { Text("API Key", color = CandyTextDim) },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                }
+            }
+            item { SectionTitle("伴生软件") }
+            item {
+                Surface(color = CandySurface, onClick = { TerminalBridge.download(ctx, TerminalBridge.Companion.SHIZUKU) }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("下载 Shizuku", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("提供 adb 级能力：终端直连执行、静默安装", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandySecondary)
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface, onClick = { TerminalBridge.download(ctx, TerminalBridge.Companion.TERMUX) }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("下载 Termux", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("Android 终端模拟器：装 git 、跑 shell（编辑页长按第 4 按钮连接）", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandySecondary)
                     }
                 }
             }

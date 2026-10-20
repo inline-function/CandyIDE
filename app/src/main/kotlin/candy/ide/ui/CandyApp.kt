@@ -23,7 +23,7 @@ import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
 import candy.ide.vm.CandyViewModel
 
-enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers }
+enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent }
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
@@ -61,6 +61,8 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
         Screen.ProjectSettings -> vm.settingsProject.value?.let { ProjectSettingsScreen(vm, it) }
         Screen.Developers -> DevelopersScreen(vm)
         Screen.IdeLog -> IdeLogScreen(vm)
+        Screen.Terminal -> TerminalScreen(vm)
+        Screen.Agent -> AgentScreen(vm)
     }
 
     // 全局安装反馈：等待框 / 成功「是否打开」/ 失败提示

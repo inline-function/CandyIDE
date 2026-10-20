@@ -4,6 +4,16 @@
 
     <!-- 外部文件访问（设置页可开启）：不声明则系统设置页里该开关为灰色且无法打开 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <!-- AI agent 联网（OpenAI 兼容端点） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 明文流量：私有部署/自建端点可能无 TLS，允许 http（https 默认可用） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Android 11+ 包可见性：查询伴生软件是否安装 -->
+    <queries>
+        <package android:name="com.termux" />
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
 
 
     <application

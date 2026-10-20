@@ -297,10 +297,17 @@ fun EditorScreen(vm: CandyViewModel) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = "运行（长按打包 APK）", tint = CandySecondary, modifier = Modifier.size(21.dp))
                                 }
                             }
-                            IconButton(onClick = { vm.openDrawerTab(vm.drawerTab) }) {
+                            // 第 4 按钮：短按 = 输出/日志抽屉；长按 = 终端（仿终端界面，意图连 Termux）
+                            Box(
+                                modifier = Modifier.size(44.dp).combinedClickable(
+                                    onClick = { vm.openDrawerTab(vm.drawerTab) },
+                                    onLongClick = { vm.screen.value = Screen.Terminal },
+                                ),
+                                contentAlignment = androidx.compose.ui.Alignment.Center,
+                            ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.List,
-                                    contentDescription = "输出/日志/诊断",
+                                    contentDescription = "输出/日志/诊断（长按打开终端）",
                                     tint = if (logOpen) CandyPrimary else CandyText)
                             }
                             var moreMenu by remember { mutableStateOf(false) }
@@ -322,6 +329,13 @@ fun EditorScreen(vm: CandyViewModel) {
                                     expanded = moreMenu,
                                     onDismissRequest = { moreMenu = false },
                                 ) {
+                                    DropdownMenuItem(
+                                        text = { Text("AI 助手") },
+                                        onClick = {
+                                            moreMenu = false
+                                            vm.goAgent()
+                                        },
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("格式化文档") },
                                         onClick = {
@@ -960,6 +974,8 @@ fun EditorScreen(vm: CandyViewModel) {
             },
             dismissButton = { TextButton(onClick = { renameReq = null }) { Text("取消") } },
         )
+        // AI agent 悬浮球（设置里 agentEnabled=true 时才出现；放最后保证不被 Scaffold 遮）
+        AgentFloatingBall(vm)
     }
 }
 
