@@ -102,7 +102,12 @@ fun AgentFloatingBall(vm: CandyViewModel) {
                                         dragging = true
                                     }
                                     PointerEventType.Release -> {
-                                        if (!dragging) expanded = true
+                                        if (!dragging) {
+                                            // 就在球的位置展开窗（右边/底边与球对齐）
+                                            winOffsetX = offsetX
+                                            winOffsetY = -offsetY
+                                            expanded = true
+                                        }
                                     }
                                     else -> {}
                                 }
@@ -161,7 +166,6 @@ private fun MiniChatWindow(
         modifier = Modifier
             .fillMaxWidth(0.46f)
             .height(200.dp)
-            .imePadding()
             .clip(RoundedCornerShape(14.dp))
             .background(FloatBg)
             .padding(10.dp),
@@ -179,14 +183,17 @@ private fun MiniChatWindow(
                 )
             },
         ) {
-            Icon(Icons.Default.SmartToy, contentDescription = null, tint = BubbleColor, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.size(6.dp))
-            Text(Settings.agentModel, color = Color.White, fontSize = 12.sp)
-            Spacer(Modifier.weight(1f))
+            Icon(Icons.Default.SmartToy, contentDescription = null, tint = BubbleColor, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.size(5.dp))
+            Text("助手", color = Color.White, fontSize = 11.sp)
+            // 发送中：助手旁显示状态 + 转圈（思考中/阅读中/编辑中/操作中）
             if (sending) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = BubbleColor, strokeWidth = 2.dp)
-                Spacer(Modifier.size(6.dp))
+                Spacer(Modifier.size(5.dp))
+                CircularProgressIndicator(modifier = Modifier.size(10.dp), color = BubbleColor, strokeWidth = 2.dp)
+                Spacer(Modifier.size(3.dp))
+                Text(statusLabel(vm), color = BubbleColor, fontSize = 10.sp)
             }
+            Spacer(Modifier.weight(1f))
             Icon(
                 Icons.Default.Fullscreen,
                 contentDescription = "全屏",
@@ -245,15 +252,15 @@ private fun MiniChatWindow(
                         vm.askAgent(ctx, text)
                     }
                 }),
-                placeholder = { Text("消息…", color = FloatDim, fontSize = 12.sp) },
-                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                placeholder = { Text("消息…", color = FloatDim, fontSize = 10.sp) },
+                textStyle = TextStyle(color = Color.White, fontSize = 11.sp),
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(10.dp),
             )
             Spacer(Modifier.size(6.dp))
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
                     .background(BubbleColor)
                     .clickable {
@@ -265,9 +272,22 @@ private fun MiniChatWindow(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("➤", color = Color.White, fontSize = 14.sp)
+                Text("➤", color = Color.White, fontSize = 10.sp)
             }
         }
+    }
+}
+
+/** 把 vm.agentStage（思考中…/调用工具 xxx…）映射成短状态：思考中/阅读中/编辑中/操作中 */
+private fun statusLabel(vm: CandyViewModel): String {
+    val stage = vm.agentStage.value
+    if (stage.isBlank()) return "思考中"
+    val tool = stage.removePrefix("调用工具 ").removeSuffix("…").trim()
+    return when (tool) {
+        "read_current_file", "read_project_file", "list_project_files", "list_diagnostics", "get_project_tree" -> "阅读中"
+        "write_current_file" -> "编辑中"
+        "run_shell" -> "操作中"
+        else -> "思考中"
     }
 }
 

@@ -390,6 +390,32 @@ fun SettingsScreen(vm: CandyViewModel) {
                         minLines = 2,
                     )
                     Spacer(Modifier.size(8.dp))
+                    // 无障碍权限：agent 后续操作 IDE 界面要用
+                    var a11yOn by remember { mutableStateOf(isAccessibilityEnabled(ctx)) }
+                    Surface(color = CandySurface, onClick = {
+                        ctx.startActivity("".let {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            intent
+                        })
+                    }) {
+                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("无障碍权限", color = CandyText)
+                                Spacer(Modifier.size(2.dp))
+                                Text(
+                                    if (a11yOn) "已开启 — agent 可操作 IDE 界面" else "未开启 — 以后 agent 操作界面会用到",
+                                    color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Switch(checked = a11yOn, onCheckedChange = {
+                                ctx.startActivity("".let {
+                                    val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    intent
+                                })
+                            })
+                        }
+                    }
+                    Spacer(Modifier.size(8.dp))
                 }
             }
             item { SectionTitle("伴生软件") }
@@ -476,4 +502,21 @@ private fun SettingsRow(key: String, value: String) {
             Text(value, color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
         }
     }
+}
+
+/** 无障碍服务是否已启用（检测 CandyIDE 服务是否在系统启用列表里） */
+private fun isAccessibilityEnabled(ctx: android.content.Context): Boolean {
+    return runCatching {
+        val enabled = android.provider.Settings.Secure.getInt(
+            ctx.contentResolver,
+            android.provider.Settings.Secure.ACCESSIBILITY_ENABLED,
+            0,
+        ) == 1
+        if (!enabled) return@runCatching false
+        val list = android.provider.Settings.Secure.getString(
+            ctx.contentResolver,
+            android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        ) ?: return@runCatching false
+        list.contains(ctx.packageName)
+    }.getOrDefault(false)
 }

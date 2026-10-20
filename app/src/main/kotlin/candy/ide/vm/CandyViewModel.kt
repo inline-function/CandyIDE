@@ -746,7 +746,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun goBack() {
         screen.value = when (screen.value) {
-            Screen.ProjectSettings -> Screen.Projects
+            // 编辑页长按进来的：工程还开着就回编辑页，否则回主页
+            Screen.ProjectSettings -> if (currentProject.value != null) Screen.Editor else Screen.Projects
             Screen.IdeLog -> Screen.Settings
             Screen.Scheme -> Screen.Settings
             Screen.Developers -> Screen.Settings

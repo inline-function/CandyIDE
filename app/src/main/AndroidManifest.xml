@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Termux RUN_COMMAND：没有 Shizuku 时把命令交给 Termux 执行（dangerous 级，需用户授权） -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+    <!-- 无障碍服务：留给 agent 后续操作 IDE 界面（系统级签名权限，需用户在系统设置手动开启） -->
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
 
     <!-- Android 11+ 包可见性：查询伴生软件是否安装 -->
     <queries>
@@ -47,6 +49,16 @@
         </activity>
 
         <!-- Shizuku 服务句柄投递入口：Shizuku/Sui 通过该 provider 把 binder 推给本应用 -->
+        <!-- 无障碍服务：留给 agent 操作 IDE 界面（系统设置手动开启，清单声明占位） -->
+        <service
+            android:name=".agent.CandyAccessibilityService"
+            android:exported="false"
+            android:label="CandyIDE Agent"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+        </service>
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

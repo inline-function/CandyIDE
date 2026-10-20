@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -76,13 +77,19 @@ fun AgentScreen(vm: CandyViewModel) {
         containerColor = CandyBg,
         topBar = {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(6.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 6.dp).statusBarsPadding(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { vm.screen.value = Screen.Editor }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = CandyText)
                 }
-                Text("AI 助手", color = CandyText, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                Text("助手", color = CandyText, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                if (sending) {
+                    Spacer(Modifier.size(6.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(10.dp), color = CandyPrimary, strokeWidth = 2.dp)
+                    Spacer(Modifier.size(4.dp))
+                    Text(agentStatusLabel(vm.agentStage.value), color = CandyPrimary, fontSize = 11.sp)
+                }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { showHistory = true }) {
                     Icon(Icons.Default.History, contentDescription = "往期对话", tint = CandySecondary)
@@ -284,4 +291,15 @@ private fun parseOptions(text: String): List<String>? {
     val m = OPTION_TAG.find(text) ?: return null
     val list = m.groupValues[1].split("|").map { it.trim() }.filter { it.isNotEmpty() }
     return if (list.size in 2..6) list else null
+}
+
+private fun agentStatusLabel(stage: String): String {
+    if (stage.isBlank()) return "思考中"
+    val tool = stage.removePrefix("调用工具 ").removeSuffix("…").trim()
+    return when (tool) {
+        "read_current_file", "read_project_file", "list_project_files", "list_diagnostics", "get_project_tree" -> "阅读中"
+        "write_current_file" -> "编辑中"
+        "run_shell" -> "操作中"
+        else -> "思考中"
+    }
 }

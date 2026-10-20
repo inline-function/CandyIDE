@@ -435,25 +435,6 @@ fun EditorScreen(vm: CandyViewModel) {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged { editorSize = it }) {
                         val active = currentFile
                         // Markdown 文件：右上角悬浮小按钮，渲染 / 文本模式互切
-                        if (active != null && active.name.endsWith(".md", ignoreCase = true)) {
-                            val rendering = vm.mdTextMode[active.absolutePath] != true
-                            androidx.compose.material3.SmallFloatingActionButton(
-                                onClick = { vm.mdTextMode[active.absolutePath] = rendering },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(end = 12.dp, top = 10.dp)
-                                    .size(40.dp),
-                                containerColor = candy.ide.ui.theme.CandySurface,
-                                contentColor = candy.ide.ui.theme.CandyPrimary,
-                            ) {
-                                androidx.compose.material3.Icon(
-                                    if (rendering) androidx.compose.material.icons.Icons.Default.Description
-                                    else androidx.compose.material.icons.Icons.Default.MenuBook,
-                                    contentDescription = if (rendering) "切换为文本编辑" else "切换为渲染预览",
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
                         if (active == null) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("从左侧文件树选择一个文件", color = CandyTextDim)
@@ -493,7 +474,9 @@ fun EditorScreen(vm: CandyViewModel) {
                                                 var we = ws
                                                 while (we > 0 && content[we - 1].let { it.isLetterOrDigit() || it == '_' }) we--
                                                 val word = content.subSequence(we, ws).toString()
-                                                val start = if (word.equals(label, ignoreCase = true)) we else left
+                                                // word==label 全删；label 以 word 为前缀（输入 v 选 var）也删掉，避免 vvar
+                                                val start = if (word.equals(label, ignoreCase = true) ||
+                                                    (word.isNotEmpty() && label.startsWith(word, ignoreCase = true))) we else left
                                                 val batch = try { content.beginBatchEdit(); true } catch (_: Throwable) { false }
                                                 try { content.replace(start, cursor.right, tpl) }
                                                 finally { if (batch) content.endBatchEdit() }
@@ -512,7 +495,11 @@ fun EditorScreen(vm: CandyViewModel) {
                                 },
                                 onDoubleClick = { x, y, line, col ->
                                     longMenu = null
-                                    val w = editor?.let { wordAt(it, line, col) }
+                                    // 优先用选区文本（双击选中的就是目标词）；选区折叠时才按位置反推
+                                    val ed0 = editor
+                                    val w = if (ed0 != null && ed0.cursor.left != ed0.cursor.right) {
+                                        ed0.text.substring(ed0.cursor.left, ed0.cursor.right).ifBlank { null }
+                                    } else ed0?.let { wordAt(it, line, col) }
                                     quickMenu = LongPressMenu(x, y, line, col)
                                     quickWord = w
                                 },
@@ -534,6 +521,25 @@ fun EditorScreen(vm: CandyViewModel) {
                                     }
                                     vm.consumeGoto()
                                 }
+                            }
+                        }
+                        if (active != null && active.name.endsWith(".md", ignoreCase = true)) {
+                            val rendering = vm.mdTextMode[active.absolutePath] != true
+                            androidx.compose.material3.SmallFloatingActionButton(
+                                onClick = { vm.mdTextMode[active.absolutePath] = rendering },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(end = 12.dp, top = 10.dp)
+                                    .size(40.dp),
+                                containerColor = candy.ide.ui.theme.CandySurface,
+                                contentColor = candy.ide.ui.theme.CandyPrimary,
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    if (rendering) androidx.compose.material.icons.Icons.Default.Description
+                                    else androidx.compose.material.icons.Icons.Default.MenuBook,
+                                    contentDescription = if (rendering) "切换为文本编辑" else "切换为渲染预览",
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
                         }
 
@@ -1170,6 +1176,20 @@ private fun namedCallOf(editor: CodeEditor, vm: CandyViewModel, line: Int, col: 
             // 去掉可变/注解前缀：只留最后一个标识符
             body.split(Regex("\\s+")).lastOrNull { it.isNotEmpty() && it.first().isLetter() }
         } ?: emptyList()
+    // 内建函数（prelude 里，工程符号表没有）：print/println/printLn 一元
+    val builtins = mapOf("print" to listOf("value"), "println" to listOf("value"), "printLn" to listOf("value"))
+    if (params.isEmpty() && builtins.containsKey(word) && args.size == 1) {
+        val rewritten2 = builtins[word]!![0] + " = " + args[0]
+        runCatching {
+            val batch2 = try { content.beginBatchEdit(); true } catch (_: Throwable) { false }
+            try { content.replace(open + 1, close, rewritten2) }
+            finally { if (batch2) content.endBatchEdit() }
+            vm.onEditorTextChanged(content.toString())
+            vm.saveCurrent(content.toString())
+            vm.mdLogUser("**[指名调用]** " + word + "(" + rewritten2 + ")")
+        }
+        return
+    }
     if (params.size != args.size) {
         return vm.mdLogUser("**[指名调用]** 签名与实参数不符（" + params.size + " 形参 vs " + args.size + " 实参），未改写")
     }
@@ -1188,6 +1208,10 @@ private fun namedCallOf(editor: CodeEditor, vm: CandyViewModel, line: Int, col: 
 
 /** 取编辑器当前光标处的词（灯泡的"重命名"快捷操作用） */
 private fun wordAtCursorOf(editor: io.github.rosemoe.sora.widget.CodeEditor, line: Int, col: Int): String {
+    val cur = editor.cursor
+    if (cur.left != cur.right) {
+        return runCatching { editor.text.substring(cur.left, cur.right) }.getOrDefault("")
+    }
     return runCatching {
         if (line < 0 || line >= editor.lineCount) return@runCatching ""
         val row = editor.text.getLine(line)

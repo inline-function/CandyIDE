@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -59,6 +60,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 private val TermBg = Color(0xFF14181C)
 private val TermFg = Color(0xFFB8E6B0)
@@ -82,6 +86,8 @@ fun TerminalScreen(vm: CandyViewModel) {
     val scope = rememberCoroutineScope()
     val lines = remember { mutableStateListOf<TermLine>() }
     var input by remember { mutableStateOf("") }
+    val focusReq = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focusReq.requestFocus() } }
     var busy by remember { mutableStateOf(false) }
     // 当前工作目录：cd 切换、提示符显示、命令执行前缀
     var cwd by remember { mutableStateOf(vm.currentProject.value?.absolutePath ?: "/sdcard") }
@@ -106,7 +112,7 @@ fun TerminalScreen(vm: CandyViewModel) {
         containerColor = TermBg,
         topBar = {
             Row(
-                modifier = Modifier.fillMaxWidth().background(TermBg).padding(8.dp),
+                modifier = Modifier.fillMaxWidth().background(TermBg).padding(8.dp).statusBarsPadding(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { vm.screen.value = Screen.Editor }) {
@@ -162,7 +168,7 @@ fun TerminalScreen(vm: CandyViewModel) {
                             singleLine = true,
                             textStyle = TextStyle(color = TermFg, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
                             cursorBrush = SolidColor(TermAccent),
-                            modifier = Modifier.weight(1f).onKeyEvent { e ->
+                            modifier = Modifier.weight(1f).focusRequester(focusReq).onKeyEvent { e ->
                                 if (e.key == Key.Enter && input.isNotBlank() && !busy) {
                                     val cmd = input; input = ""
                                     submitCmd(ctx, scope, lines, cmd, cwd, busy, { busy = it }, { cwd = it })
