@@ -42,8 +42,14 @@ class OpenAiCompatModel(
     override fun generateContent(request: LlmRequest, stream: Boolean): Flow<LlmResponse> = flow {
         val payload = buildPayload(request)
         val resp = postJson(baseUrl.trimEnd('/') + "/chat/completions", payload)
+        android.util.Log.w("CandyAgent", "model resp head: " + resp.take(400))
         val json = JSONObject(resp)
-        val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: return@flow
+        val optChoices = json.optJSONArray("choices")
+        val choice = optChoices?.optJSONObject(0)
+        if (choice == null) {
+            android.util.Log.w("CandyAgent", "no choices in response")
+            return@flow
+        }
         val msg = choice.optJSONObject("message") ?: JSONObject()
         val content = msg.optString("content")
         val parts = mutableListOf<Part>()

@@ -840,6 +840,23 @@ fun EditorScreen(vm: CandyViewModel) {
                             TextButton(
                                 onClick = {
                                     val ed = editor
+                                    if (ed != null && fix.command != null) {
+                                        // LSP command 型快捷操作：重命名 / 转到定义
+                                        val cur = ed.cursor
+                                        when (fix.command) {
+                                            "editor.action.rename" -> renameReq =
+                                                RenameRequest(
+                                                    wordAtCursorOf(ed, cur.leftLine, cur.leftColumn),
+                                                    cur.leftLine,
+                                                    cur.leftColumn,
+                                                )
+                                            "editor.action.revealDefinition" ->
+                                                goToDefinition(vm, ed, cur.leftLine, cur.leftColumn)
+                                        }
+                                        vm.mdLogUser("**[快捷操作]** " + fix.title)
+                                        fixPopup = false
+                                        return@TextButton
+                                    }
                                     if (ed != null) {
                                         val content = ed.text
                                         fix.edits
@@ -1166,4 +1183,18 @@ private fun namedCallOf(editor: CodeEditor, vm: CandyViewModel, line: Int, col: 
         vm.saveCurrent(content.toString())
         vm.mdLogUser("**[指名调用]** " + word + "(" + rewritten + ")")
     }.onFailure { vm.mdLogUser("**[指名调用]** 改写失败：" + (it.message ?: it.javaClass.simpleName)) }
+}
+
+
+/** 取编辑器当前光标处的词（灯泡的"重命名"快捷操作用） */
+private fun wordAtCursorOf(editor: io.github.rosemoe.sora.widget.CodeEditor, line: Int, col: Int): String {
+    return runCatching {
+        if (line < 0 || line >= editor.lineCount) return@runCatching ""
+        val row = editor.text.getLine(line)
+        var l = (col - 1).coerceAtLeast(0)
+        var r = col
+        while (l > 0 && (row[l - 1].isLetterOrDigit() || row[l - 1] == '_')) l--
+        while (r < row.length && (row[r].isLetterOrDigit() || row[r] == '_')) r++
+        row.substring(l, r)
+    }.getOrDefault("")
 }

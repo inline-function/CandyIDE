@@ -45,6 +45,7 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
 回答用中文，简洁、给代码示例时用 Sublimation 语法：
   fun main() { unchecked print("hi") }   // 函数体、lambda { x -> x + 1 }、元组 (a, b)、模式匹配 match
 你可用工具读当前文件、执行 shell 命令、获取编译诊断。不确定就明说，别编造 API。
+需要用户在几个方案间选择时，在回复末尾加一行【选项：方案A|方案B|方案C】（2~6 个，竖线分隔，简短）。
 """
         }) + tools.toolDescriptions()
 

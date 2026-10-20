@@ -1266,7 +1266,12 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 灯泡：当前文件可用的快速修正（LSP codeActions） */
-    data class QuickFix(val title: String, val edits: List<Pair<Range, String>>)
+    data class QuickFix(
+        val title: String,
+        val edits: List<Pair<Range, String>>,
+        /** command 型快捷操作：重命名 / 转到定义（IDE 侧已有实现，点灯泡直接触发） */
+        val command: String? = null,
+    )
 
         /** 全文格式化：向 LSP 要 TextEdit，回填编辑器（批量编辑，可一次撤销） */
     fun formatDocument(): Boolean {
@@ -1291,7 +1296,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         return runCatching {
             analysis.updateDocument(name, loadTextFor(f))
             analysis.codeActions(name).map { a ->
-                QuickFix(a.title, a.edit?.changes?.get(name)?.map { it.range to it.newText } ?: emptyList())
+                QuickFix(
+                    a.title,
+                    a.edit?.changes?.get(name)?.map { it.range to it.newText } ?: emptyList(),
+                    a.command?.command,
+                )
             }
         }.getOrDefault(emptyList())
     }
