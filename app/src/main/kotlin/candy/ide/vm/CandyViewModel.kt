@@ -295,6 +295,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val first = dir.walkTopDown()
             .filter { it.isFile && (it.name.endsWith(".subs") || it.name.endsWith(".subl")) }
             .minByOrNull { it.name }
+            // md 文档工程/内置工程：没有源文件则开第一篇 md
+            ?: dir.walkTopDown().filter { it.isFile && it.name.endsWith(".md") }.minByOrNull { it.name }
         Snapshot.withMutableSnapshot {
             currentProject.value = dir
             openFiles.clear()
@@ -779,6 +781,29 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun onAgentTurnDone() {
         resumeNonce.intValue++
         treeVersion.intValue++
+    }
+
+    /** 内置工程：首次从 assets 释放到 files/candy/builtin/<name>/ 并打只读标记，随后打开。 */
+    fun openBuiltinProject(ctx: android.content.Context, assetDir: String, name: String) {
+        val root = ProjectStore.builtinRoot(ctx)
+        val dir = java.io.File(root, name)
+        // 首次（或被清空后）从 assets 释放；已存在则直接打开
+        if (!dir.isDirectory || java.io.File(dir, ".candy_builtin").isFile.not() || dir.listFiles()?.isEmpty() == true) {
+            dir.mkdirs()
+            runCatching {
+                val files = ctx.assets.list("builtin/" + assetDir) ?: emptyArray()
+                files.forEach { fn ->
+                    ctx.assets.open("builtin/" + assetDir + "/" + fn).use { input ->
+                        java.io.File(dir, fn).outputStream().use { input.copyTo(it) }
+                    }
+                }
+                ProjectStore.writeType(dir, ProjectStore.TYPE_MD)
+                ProjectStore.markBuiltin(dir)
+            }.onFailure {
+                mdLogUser("**[内置工程]** 释放失败 " + (it.message ?: it.javaClass.simpleName))
+            }
+        }
+        openProject(dir)
     }
 
     fun goBack() {

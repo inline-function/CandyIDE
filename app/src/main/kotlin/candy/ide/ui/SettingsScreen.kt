@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -416,6 +418,31 @@ fun SettingsScreen(vm: CandyViewModel) {
                         }
                     }
                     Spacer(Modifier.size(8.dp))
+                }
+            }
+            item { SectionTitle("内置工程（只读）") }
+            item {
+                Surface(color = CandySurface, onClick = { vm.openBuiltinProject(ctx, "lang-doc", "语言文档") }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("语言文档", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("Sublimation 形式化文档 · wiki · 根文档", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.Default.MenuBook, contentDescription = null, tint = CandyTextDim, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface, onClick = { vm.openBuiltinProject(ctx, "ide-doc", "IDE 文档") }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("IDE 文档", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("CandyIDE 使用手册（编辑器 · 终端 · AI 助手）", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.Default.Description, contentDescription = null, tint = CandyTextDim, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
             item { SectionTitle("伴生软件") }
