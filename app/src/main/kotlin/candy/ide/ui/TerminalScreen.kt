@@ -155,7 +155,12 @@ fun TerminalScreen(vm: CandyViewModel) {
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(promptText(cwd, homeDir()), color = TermAccent, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        Text(
+                            promptText(cwd, homeDir()),
+                            color = TermAccent, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(0.35f, fill = false),
+                        )
                         BasicTextField(
                             value = input,
                             onValueChange = { input = it },

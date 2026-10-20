@@ -573,6 +573,11 @@ fun EditorScreen(vm: CandyViewModel) {
 
                         // 长按菜单（快捷操作：长按 = 转定义/重命名/指名调用；双击 = 文本操作）
                         longMenu?.let { menu ->
+                            // 长按位置现场取词：选区优先（长按选词已选中），否则按行列反推
+                            val ed0 = editor
+                            val word = if (ed0 != null && ed0.cursor.left != ed0.cursor.right) {
+                                runCatching { ed0.text.substring(ed0.cursor.left, ed0.cursor.right) }.getOrNull()
+                            } else ed0?.let { wordAt(it, menu.line, menu.col) }
                             Surface(
                                 modifier = Modifier
                                     .width(180.dp)
@@ -588,7 +593,6 @@ fun EditorScreen(vm: CandyViewModel) {
                             ) {
                                 Column {
                                     val ed = editor
-                                    val word = quickWord
                                     if (word != null) {
                                         LongMenuRow("使用指名调用法") {
                                             longMenu = null
@@ -1155,9 +1159,12 @@ private fun namedCallOf(editor: CodeEditor, vm: CandyViewModel, line: Int, col: 
     // 拆分顶层实参（逗号配平）
     val args = mutableListOf<String>()
     var depth2 = 0
+    var inStr = false
     val sb = StringBuilder()
     for (c in argsRaw) {
         when {
+            c == '"' -> { inStr = !inStr; sb.append(c) }
+            inStr -> sb.append(c)
             c == '(' || c == '[' -> { depth2++; sb.append(c) }
             c == ')' || c == ']' -> { depth2--; sb.append(c) }
             c == ',' && depth2 == 0 -> { args.add(sb.toString().trim()); sb.clear() }

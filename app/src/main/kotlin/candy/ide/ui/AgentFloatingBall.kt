@@ -133,12 +133,15 @@ fun AgentFloatingBall(vm: CandyViewModel) {
                 },
                 onFullScreen = {
                     expanded = false
-                    winOffsetX = 0f; winOffsetY = 0f
+                    offsetX = winOffsetX
+                    offsetY = -winOffsetY
                     vm.screen.value = Screen.Agent
                 },
                 onClose = {
                     expanded = false
-                    winOffsetX = 0f; winOffsetY = 0f
+                    // 窗在哪收起，球就出现在哪
+                    offsetX = winOffsetX
+                    offsetY = -winOffsetY
                 },
                 )
             }
