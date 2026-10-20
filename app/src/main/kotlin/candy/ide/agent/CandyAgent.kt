@@ -57,12 +57,12 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
     fun ask(userText: String): Flow<Event> = flow {
         // 每次发起前刷新一次工具看到的上下文
         // 1) 追加用户消息
-        val userContent = Content.fromText(userText, "user")
+        val userContent = Content(parts = listOf(Part(text = userText)), role = "user")
         persist(userContent, "user")
         emit(eventOf(userContent, author = "user"))
         // 2) 组织对话历史（system + session 里已累积的 events）
         val history = mutableListOf<Content>()
-        history.add(Content.fromText(systemPrompt, "system"))
+        history.add(Content(parts = listOf(Part(text = systemPrompt)), role = "system"))
         for (e in session.events) {
             val c = e.content ?: continue
             if (c.role == "user" || c.role == "model") history.add(c)
@@ -87,7 +87,7 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
             val text = content.parts.mapNotNull { it.text }.joinToString("").trim()
             if (calls.isEmpty()) {
                 val answer = if (text.isBlank()) "（模型未返回正文，可能被思考占满；提高 max_tokens 或换个问法）" else text
-                val modelContent = Content.fromText(answer, "model")
+                val modelContent = Content(parts = listOf(Part(text = answer)), role = "model")
                 persist(modelContent, "model")
                 emit(eventOf(modelContent, author = "model"))
                 break
@@ -130,7 +130,7 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
             content = content,
         )
 
-        private fun errorEvent(msg: String): Event = eventOf(Content.fromText(msg, "model"), author = "model")
+        private fun errorEvent(msg: String): Event = eventOf(Content(parts = listOf(Part(text = msg)), role = "model"), author = "model")
 
         private fun toolEvent(name: String, args: Map<String, Any?>, result: String): Event = Event(
             id = java.util.UUID.randomUUID().toString(),

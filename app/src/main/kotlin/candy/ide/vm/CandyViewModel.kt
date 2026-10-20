@@ -472,6 +472,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 agent!!.ask(text).collect { ev ->
                     val author = ev.author
+                    if (author == "user") return@collect   // 用户气泡已在上方直接添加，跳过回声
                     val body = ev.content?.parts?.mapNotNull { it.text }?.joinToString("")?.trim() ?: ""
                     if (body.isBlank()) return@collect
                     val role = when (author) {
