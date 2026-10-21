@@ -55,7 +55,6 @@ import candy.ide.ui.theme.CandySurface
 import candy.ide.ui.theme.CandyText
 import candy.ide.ui.theme.CandyTextDim
 import candy.ide.vm.CandyViewModel
-import java.io.File
 
 /**
  * 工程设置：重命名工程；JS-apk 工程的包名 / 应用名 / 版本号 / 版本名
@@ -63,7 +62,7 @@ import java.io.File
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
+fun ProjectSettingsScreen(vm: CandyViewModel, dir: candy.ide.fs.CandyPath) {
     BackHandler { vm.goBack() }
     val type = remember(dir) { ProjectStore.typeOf(dir) }
     val isJsApk = type == ProjectStore.TYPE_JSAPK
@@ -73,7 +72,7 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
     val cfg = remember(dir) {
         val c = JsApkConfig.load(dir)
         // JS 平台工程没配过时，预填 ASCII 包名（工程名里的汉字不合法）和应用名
-        if (type == ProjectStore.TYPE_JS && !File(dir, "jsapk.json").isFile)
+        if (type == ProjectStore.TYPE_JS && dir.find("jsapk.json")?.isFile() != true)
             c.copy(pkg = JsApkConfig.DEFAULT_PACKAGE + "." + vm.asciiPackageSeed(dir.name), label = dir.name)
         else c
     }
@@ -190,10 +189,10 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
                         )
                         Spacer(Modifier.size(8.dp))
                         val ctx = LocalContext.current
-                        var iconFile by remember(dir) { mutableStateOf<File?>(File(dir, "icon.png").takeIf { it.isFile }) }
+                        var iconFile by remember(dir) { mutableStateOf(dir.find("icon.png")) }
                         val iconPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
                             if (uri != null) runCatching {
-                                val target = File(dir, "icon.png")
+                                val target = dir.find("icon.png") ?: dir.child("icon.png")
                                 ctx.contentResolver.openInputStream(uri)?.use { input ->
                                     target.outputStream().use { input.copyTo(it) }
                                 }
@@ -203,7 +202,7 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             iconFile?.let { f ->
-                                val bmp = remember(f) { runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() }
+                                val bmp = remember(f) { runCatching { BitmapFactory.decodeStream(f.inputStream()) }.getOrNull() }
                                 bmp?.let {
                                     Image(
                                         bitmap = it.asImageBitmap(),
@@ -230,7 +229,7 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
                                 label = label.ifBlank { cfg.label },
                                 versionCode = versionCode.coerceAtLeast(1),
                                 versionName = versionName.ifBlank { "1.0" },
-                                icon = if (File(dir, "icon.png").isFile) "icon.png" else null,
+                                icon = if (dir.find("icon.png")?.isFile() == true) "icon.png" else null,
                                 certPath = certPath.ifBlank { null },
                                 certPass = certPass.ifBlank { null },
                             ))
@@ -247,7 +246,7 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: File) {
                                     label = label.ifBlank { cfg.label },
                                     versionCode = versionCode.coerceAtLeast(1),
                                     versionName = versionName.ifBlank { "1.0" },
-                                    icon = if (File(dir, "icon.png").isFile) "icon.png" else null,
+                                    icon = if (dir.find("icon.png")?.isFile() == true) "icon.png" else null,
                                     certPath = certPath.ifBlank { null },
                                     certPass = certPass.ifBlank { null },
                                 )) },

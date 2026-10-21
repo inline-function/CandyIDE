@@ -42,9 +42,9 @@ import io.github.rosemoe.sora.widget.component.EditorAutoCompletion
 @Composable
 fun SoraEditorView(
     modifier: Modifier,
-    file: File?,
+    file: candy.ide.fs.CandyPath?,
     vm: CandyViewModel,
-    textProvider: (File) -> String = { it.readText() },
+    textProvider: (candy.ide.fs.CandyPath) -> String = { it.readText() },
     onEditorReady: (CodeEditor) -> Unit,
     onLongPress: (x: Float, y: Float, line: Int, column: Int) -> Unit = { _, _, _, _ -> },
     onDoubleClick: (x: Float, y: Float, line: Int, column: Int) -> Unit = { _, _, _, _ -> },
@@ -58,7 +58,7 @@ fun SoraEditorView(
 ) {
     var editor by remember { mutableStateOf<CodeEditor?>(null) }
     var layoutInstalled by remember { mutableStateOf(false) }
-    var loaded by remember { mutableStateOf<File?>(null) }
+    var loaded by remember { mutableStateOf<candy.ide.fs.CandyPath?>(null) }
     // 外部修改同步（黄条「同步」）：由_nonce 递增触发强制重读磁盘
     var reloadKey by remember { mutableIntStateOf(0) }
     val ctx = LocalContext.current

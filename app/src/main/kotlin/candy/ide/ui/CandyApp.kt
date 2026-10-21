@@ -8,6 +8,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,6 +28,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import candy.ide.fs.CandyFs
 import candy.ide.ui.theme.CandyBg
 import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
@@ -31,6 +38,39 @@ enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog,
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
+    val ctx = LocalContext.current
+    // 首次使用：必须选择一个目录作为 IDE 目录（SAF），否则退出
+    var pendingFirstUse by remember { mutableStateOf(!CandyFs.isReady(ctx)) }
+    if (pendingFirstUse) {
+        val picker = rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+        ) { uri ->
+            if (uri != null) {
+                CandyFs.setWorkspace(ctx, uri, migrate = true)
+                pendingFirstUse = false
+            }
+        }
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("欢迎使用 CandyIDE") },
+            text = {
+                Text(
+                    "第一次使用需要选择一个目录作为 IDE 目录。\n" +
+                    "你可以在存储目录下创建一个名为 CandyIDE 的目录，然后选中它。\n" +
+                    "工程文件将保存在这个目录里，可以直接用系统文件管理器查看。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { picker.launch(null) }) { Text("同意并选择") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    // 不同意：直接退出 IDE
+                    candy.ide.MainActivity::class.java.let { _ -> (ctx as? android.app.Activity)?.finish() }
+                }) { Text("退出") }
+            },
+        )
+    }
     // 外部文件接收结果（jks/caco/capr）
     vm.ingestResult.value?.let { res ->
         AlertDialog(
@@ -80,7 +120,6 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
     }
 
     // 全局安装反馈：等待框 / 成功「是否打开」/ 失败提示
-    val ctx = LocalContext.current
     // 轻量提示：显示 2 秒后自动清空
     val toastMsg = vm.toast.value
     if (toastMsg.isNotBlank()) {

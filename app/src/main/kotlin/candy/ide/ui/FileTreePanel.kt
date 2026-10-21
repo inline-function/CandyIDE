@@ -60,14 +60,13 @@ import candy.ide.ui.theme.CandyTertiary
 import candy.ide.ui.theme.CandyText
 import candy.ide.ui.theme.CandyTextDim
 import candy.ide.vm.CandyViewModel
-import java.io.File
 
 /** 左侧抽屉：IDEA 式工程文件树 + 新建/重命名/删除。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileTreePanel(
     vm: CandyViewModel,
-    onFileClick: (File) -> Unit,
+    onFileClick: (candy.ide.fs.CandyPath) -> Unit,
     drawerClose: () -> Unit = {},
 ) {
     val project = vm.currentProject.value
@@ -79,14 +78,14 @@ fun FileTreePanel(
     var renamingNode by remember { mutableStateOf<TreeNode?>(null) }
     var pendingDelete by remember { mutableStateOf<TreeNode?>(null) }
     var menuNode by remember { mutableStateOf<TreeNode?>(null) }
-    var pendingDeleteMulti by remember { mutableStateOf<List<File>?>(null) }
-    var pendingZip by remember { mutableStateOf<File?>(null) }
+    var pendingDeleteMulti by remember { mutableStateOf<List<candy.ide.fs.CandyPath>?>(null) }
+    var pendingZip by remember { mutableStateOf<candy.ide.fs.CandyPath?>(null) }
     var openWithNode by remember { mutableStateOf<TreeNode?>(null) }
     // 新建文件/目录的落地目录：点目录行即选中它（展开/收起照旧），默认工程根
-    var selectedDir by remember { mutableStateOf<File?>(null) }
+    var selectedDir by remember { mutableStateOf<candy.ide.fs.CandyPath?>(null) }
     // ---- 多选模式 ----
     var multiMode by remember { mutableStateOf(false) }
-    val multiSet = remember { androidx.compose.runtime.mutableStateListOf<File>() }
+    val multiSet = remember { androidx.compose.runtime.mutableStateListOf<candy.ide.fs.CandyPath>() }
 
     ModalDrawerSheet(modifier = Modifier.width(300.dp).background(CandySurface)) {
         Row(
@@ -130,8 +129,9 @@ fun FileTreePanel(
                     )
                     androidx.compose.material3.AssistChip(
                         onClick = {
-                            val target = File(project, "selected-" + System.currentTimeMillis() + ".zip")
-                            vm.zipMulti(multiSet.toList(), target)
+                            val target = project?.child("selected-" + System.currentTimeMillis() + ".zip")
+                            if (target != null) vm.zipMulti(multiSet.toList(), target)
+
                             multiSet.clear(); multiMode = false
                         },
                         label = { Text("压缩 zip", style = MaterialTheme.typography.labelSmall) },
@@ -329,7 +329,7 @@ fun FileTreePanel(
     }
 }
 
-private data class NewNodeRequest(val parent: File, val isDirectory: Boolean)
+private data class NewNodeRequest(val parent: candy.ide.fs.CandyPath, val isDirectory: Boolean)
 
 @Composable
 private fun NodeNameDialog(title: String, confirm: String, initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
@@ -364,11 +364,11 @@ private fun NodeNameDialog(title: String, confirm: String, initial: String, onCo
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RootRow(
-    project: File,
+    project: candy.ide.fs.CandyPath,
     expanded: Boolean,
     selected: Boolean,
     onToggle: () -> Unit,
-    onSelect: (File) -> Unit,
+    onSelect: (candy.ide.fs.CandyPath) -> Unit,
     onMenu: (TreeNode) -> Unit,
 ) {
     Row(
@@ -407,13 +407,13 @@ private fun TreeNodes(
     nodes: List<TreeNode>,
     depth: Int,
     vm: CandyViewModel,
-    selectedDir: File?,
-    onFileClick: (File) -> Unit,
+    selectedDir: candy.ide.fs.CandyPath?,
+    onFileClick: (candy.ide.fs.CandyPath) -> Unit,
     onNodeMenu: (TreeNode) -> Unit,
-    onSelectDir: (File) -> Unit,
-    onZipClick: (File) -> Unit = {},
+    onSelectDir: (candy.ide.fs.CandyPath) -> Unit,
+    onZipClick: (candy.ide.fs.CandyPath) -> Unit = {},
     multiMode: Boolean = false,
-    multiSet: SnapshotStateList<File>? = null,
+    multiSet: SnapshotStateList<candy.ide.fs.CandyPath>? = null,
 ) {
     for (node in nodes) {
         TreeRow(node, depth, vm, selectedDir, onFileClick, onNodeMenu, onSelectDir, onZipClick, multiMode, multiSet)
@@ -429,13 +429,13 @@ private fun TreeRow(
     node: TreeNode,
     depth: Int,
     vm: CandyViewModel,
-    selectedDir: File?,
-    onFileClick: (File) -> Unit,
+    selectedDir: candy.ide.fs.CandyPath?,
+    onFileClick: (candy.ide.fs.CandyPath) -> Unit,
     onNodeMenu: (TreeNode) -> Unit,
-    onSelectDir: (File) -> Unit,
-    onZipClick: (File) -> Unit = {},
+    onSelectDir: (candy.ide.fs.CandyPath) -> Unit,
+    onZipClick: (candy.ide.fs.CandyPath) -> Unit = {},
     multiMode: Boolean = false,
-    multiSet: SnapshotStateList<File>? = null,
+    multiSet: SnapshotStateList<candy.ide.fs.CandyPath>? = null,
 ) {
     val selected = vm.currentFile.value == node.file
     val dirSelected = node.isDir && selectedDir == node.file

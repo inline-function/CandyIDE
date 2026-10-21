@@ -24,12 +24,9 @@ object JksReader {
 
     data class KeyMaterial(val key: PrivateKey, val cert: X509Certificate)
 
-    fun read(jksFile: File, password: CharArray): KeyMaterial? = runCatching {
-        RandomAccessFile(jksFile, "r").use { raf ->
-            val buf = ByteArray(raf.length().toInt())
-            raf.readFully(buf)
-            parse(buf, utf16be(password))
-        }
+    fun read(jksFile: candy.ide.fs.CandyPath, password: CharArray): KeyMaterial? = runCatching {
+        val buf = jksFile.inputStream().use { it.readBytes() }
+        parse(buf, utf16be(password))
     }.getOrNull()
 
     private fun utf16be(password: CharArray): ByteArray {

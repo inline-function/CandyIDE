@@ -24,13 +24,13 @@ object JksWriter {
 
     /** 生成并落盘，返回 keystore 文件 */
     fun generate(
-        target: File,
+        target: candy.ide.fs.CandyPath,
         alias: String,
         password: CharArray,
         commonName: String,
         validityYears: Int,
         keySize: Int = 2048,
-    ): Result<File> = runCatching {
+    ): Result<candy.ide.fs.CandyPath> = runCatching {
         val kpg = KeyPairGenerator.getInstance("RSA")
         kpg.initialize(keySize, SecureRandom())
         val pair: KeyPair = kpg.generateKeyPair()
@@ -38,7 +38,6 @@ object JksWriter {
         val notAfter = Date(System.currentTimeMillis() + validityYears.toLong() * 365 * 24 * 3600 * 1000)
         val cert = SelfSignedCert.make(pair, commonName, notBefore, notAfter)
         val protectedKey = protect(pair.private.encoded, password)
-        target.parentFile?.mkdirs()
         // 先把条目序列化进内存，再追加整库 HMAC（DigestInputStream 的验证顺序要求）
         val body = java.io.ByteArrayOutputStream().apply {
             DataOutputStream(this).use { dos ->
@@ -63,8 +62,7 @@ object JksWriter {
         h.update(utf16be(password))
         h.update("Mighty Aphrodite".toByteArray(Charsets.UTF_8))
         h.update(body)
-        target.parentFile?.mkdirs()
-        FileOutputStream(target).use { it.write(body + h.digest()) }
+        target.outputStream().use { it.write(body + h.digest()) }
         target
     }
 

@@ -19,8 +19,8 @@ object ShizukuShell {
     }.getOrNull()
 
     /** 流式安装：pm install -S <size> 从 stdin 读 APK，绕开 shell 用户读不了应用私有目录的限制 */
-    fun installStream(apk: File): String? = runCatching {
-        val data = apk.readBytes()
+    fun installStream(apk: candy.ide.fs.CandyPath): String? = runCatching {
+        val data = apk.inputStream().use { it.readBytes() }
         val proc = obtain(arrayOf("pm", "install", "-S", data.size.toString())) ?: return null
         proc.outputStream.use { it.write(data); it.flush() }
         val out = proc.inputStream.bufferedReader().use { it.readText().trim() }

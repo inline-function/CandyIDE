@@ -69,20 +69,21 @@ object Engine {
     fun root(ctx: Context): File = File(ctx.filesDir, "candy")
 
     /** 组装临时编译根：core 标准库（files/candy/core）+ 工程源文件（保持工程内相对路径） */
-    private fun prepareCompileRoot(ctx: Context, project: File): File {
+    private fun prepareCompileRoot(ctx: Context, project: candy.ide.fs.CandyPath): File {
         val compileRoot = File(ctx.cacheDir, "candy/compileRoot")
         compileRoot.deleteRecursively()
         compileRoot.mkdirs()
         val coreSrc = File(root(ctx), "core")
         if (coreSrc.isDirectory) coreSrc.copyRecursively(File(compileRoot, "core"), overwrite = true)
-        for (f in project.walkTopDown()) {
-            if (!f.isFile) continue
-            val rel = f.relativeTo(project).path.replace('\\', '/')
+        // 相对路径收集工程源码（SAF 路径也能拿到相对路径）
+        for ((f, rel) in project.walkRelative()) {
+            if (rel.isBlank()) continue
+            if (!f.isFile()) continue
             if (rel.startsWith("build/") || rel.startsWith(".")) continue
-            if (!f.name.endsWith(".subl") && !f.name.endsWith(".subs") && !f.name.endsWith(".settings")) continue
+            if (!rel.endsWith(".subl") && !rel.endsWith(".subs") && !rel.endsWith(".settings")) continue
             val target = File(compileRoot, rel)
             target.parentFile?.mkdirs()
-            f.copyTo(target, overwrite = true)
+            f.inputStream().use { ins -> target.outputStream().use { out -> ins.copyTo(out) } }
         }
         return compileRoot
     }
@@ -94,12 +95,12 @@ object Engine {
     * - onDone：本次执行收尾（主线程）
     */
     fun run(
-        ctx: Context, script: File,
+        ctx: Context, script: candy.ide.fs.CandyPath,
         onLine: (String) -> Unit, onDone: () -> Unit,
         onInput: (() -> String?)? = null,
         onCompiled: ((Long) -> Unit)? = null,
     ) {
-        val project = script.parentFile ?: script
+        val project = script.parent ?: script
         val src = script.readText()
         val compileRoot = prepareCompileRoot(ctx, project)
         val started = System.currentTimeMillis()
@@ -119,8 +120,8 @@ object Engine {
     * 只编译不执行：JS-apk 打包用（与 run() 共用同一套多模块编译）。
     * 抛出即视为编译失败，message 已带报告。
     */
-    fun compileToJs(ctx: Context, script: File, onCompiled: ((Long) -> Unit)? = null): String {
-        val project = script.parentFile ?: script
+    fun compileToJs(ctx: Context, script: candy.ide.fs.CandyPath, onCompiled: ((Long) -> Unit)? = null): String {
+        val project = script.parent ?: script
         val src = script.readText()
         val compileRoot = prepareCompileRoot(ctx, project)
         val started = System.currentTimeMillis()
@@ -137,7 +138,7 @@ object Engine {
     /**
     * 脚本工程直连解释器（.subs 顶层语句直接执行，无 main）。
     */
-    fun runScript(ctx: Context, script: File, onLine: (String) -> Unit, onDone: () -> Unit) {
+    fun runScript(ctx: Context, script: candy.ide.fs.CandyPath, onLine: (String) -> Unit, onDone: () -> Unit) {
         val stdlibDir = File(root(ctx), "core")
         val interp = if (stdlibDir.isDirectory) Interpreter(stdlibDir) else Interpreter()
         interp.register("print") { args ->
@@ -146,11 +147,18 @@ object Engine {
             onLine(line)
             null
         }
+        // md 文档不是可执行代码，直接拒绝（运行按钮在 UI 层也应拦截 md 工程）
+        if (script.extension == "md") throw RuntimeException("md 文档不能运行：请长按「运行」打包成文档 APK")
         try {
+            // 解释器跑本地文件系统：脚本工程内容落到缓存目录临时执行
+            val tmpDir = java.io.File(ctx.cacheDir, "candy/scriptRun")
+            tmpDir.deleteRecursively(); tmpDir.mkdirs()
+            val tmpScript = java.io.File(tmpDir, script.name)
+            script.inputStream().use { ins -> tmpScript.outputStream().use { out -> ins.copyTo(out) } }
             if (script.name.endsWith(".subl")) {
-                interp.runDir(script.parentFile ?: script)
+                interp.runDir(tmpDir)
             } else {
-                interp.runScript(script)
+                interp.runScript(tmpScript)
             }
         } catch (re: RuntimeException) {
             throw RuntimeException("脚本执行出错：\n" + (re.message ?: re.javaClass.simpleName))

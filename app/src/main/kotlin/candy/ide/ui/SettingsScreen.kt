@@ -74,6 +74,8 @@ fun SettingsScreen(vm: CandyViewModel) {
     var agentModel by remember { mutableStateOf(Settings.agentModel) }
     var agentKey by remember { mutableStateOf(Settings.agentKey) }
     var shizukuInfo by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var pendingReset by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         shizukuState = ShizukuManager.state()
@@ -385,6 +387,64 @@ fun SettingsScreen(vm: CandyViewModel) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.size(8.dp))
+                    // 采样温度：0~2 拖动条
+                    var agentTemp by remember { mutableStateOf(Settings.agentTemperature) }
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Temperature", color = CandyTextDim, fontSize = 13.sp)
+                            Spacer(Modifier.weight(1f))
+                            Text(String.format("%.1f", agentTemp), color = CandyPrimary, fontSize = 13.sp)
+                        }
+                        androidx.compose.material3.Slider(
+                            value = agentTemp,
+                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 2f) },
+                            onValueChangeFinished = {
+                                Settings.agentTemperature = agentTemp
+                                Settings.persist(ctx)
+                            },
+                            valueRange = 0f..2f,
+                            steps = 19,
+                        )
+                    }
+                    Spacer(Modifier.size(8.dp))
+                    // 流式输出：可选项
+                    var agentStream by remember { mutableStateOf(Settings.agentStream) }
+                    var streamExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        Surface(color = CandySurface, onClick = { streamExpanded = true }) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Stream", color = CandyText)
+                                    Text(
+                                        if (agentStream) "流式输出（SSE，逐字返回）" else "整包返回（等待完整响应）",
+                                        color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandyTextDim)
+                            }
+                        }
+                        DropdownMenu(expanded = streamExpanded, onDismissRequest = { streamExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("流式输出（SSE）") },
+                                onClick = {
+                                    agentStream = true
+                                    Settings.agentStream = true
+                                    Settings.persist(ctx)
+                                    streamExpanded = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("整包返回") },
+                                onClick = {
+                                    agentStream = false
+                                    Settings.agentStream = false
+                                    Settings.persist(ctx)
+                                    streamExpanded = false
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.size(8.dp))
                     var agentPrompt by remember { mutableStateOf(Settings.agentPrompt) }
                     OutlinedTextField(
                         value = agentPrompt,
@@ -540,7 +600,71 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
+            item { SectionTitle("结束") }
+            item {
+                Surface(color = CandySurface, onClick = { vm.closeIde(ctx) }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("关闭 IDE", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("结束所有页面并杀掉后台进程，下次从桌面打开即为冷启动", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface, onClick = { pendingReset = true }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("重置 IDE", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("删除整个 IDE 目录并清空应用数据（目录授权会保留），相当于卸载重装", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface, onClick = { pendingDelete = true }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("删除 IDE", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("删除 IDE 目录并撤销目录授权，然后跳转系统卸载页面", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
         }
+    }
+    // 重置 IDE：确认框（权限保留，其余全删 → 冷启动）
+    if (pendingReset) {
+        AlertDialog(
+            onDismissRequest = { pendingReset = false },
+            title = { Text("重置 IDE") },
+            text = { Text("将删除整个 IDE 目录（含全部工程）并清空应用数据。\n除了已授予的目录权限之外一切都会重置，效果等同于卸载重装。\n是否继续？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingReset = false
+                    vm.resetIde(ctx)
+                }) { Text("重置") }
+            },
+            dismissButton = { TextButton(onClick = { pendingReset = false }) { Text("取消") } },
+        )
+    }
+    // 删除 IDE：确认框（删目录 + 撤授权 + 系统卸载）
+    if (pendingDelete) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = false },
+            title = { Text("删除 IDE") },
+            text = { Text("将删除整个 IDE 目录、撤销目录授权，并跳转到系统的卸载页面。\n此操作不可撤销，是否继续？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDelete = false
+                    vm.deleteIde(ctx)
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = false }) { Text("取消") } },
+        )
     }
 }
 

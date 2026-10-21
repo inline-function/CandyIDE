@@ -22,17 +22,23 @@ import java.security.cert.X509Certificate
  * 仅保证「包能装上、运行时校验一致」，不是正式开发签名。
  */
 object ApkSigner {
+    @JvmStatic private var cacheDirHook: java.io.File? = null
+    @JvmStatic fun attachCache(dir: java.io.File) { cacheDirHook = dir }
+    private fun ctxCache(apk: candy.ide.fs.CandyPath): java.io.File =
+        cacheDirHook ?: java.io.File(System.getProperty("java.io.tmpdir", "/data/local/tmp"))
 
     private const val ALIAS_CERT = "sdk/jsapk/candy_jsapk.cert.der"
     private const val ALIAS_KEY = "sdk/jsapk/candy_jsapk.key.pk8"
 
     /** 从 APK 读出全部条目（不含旧 META-INF）的未压缩字节 + 重新打包成已签名 APK */
-    fun signV1(apk: File, entries: List<Pair<String, ByteArray>>): Unit = rezip(apk, entries)
+    fun signV1(apk: candy.ide.fs.CandyPath, entries: List<Pair<String, ByteArray>>): Unit = rezip(apk, entries)
 
     // ---- 重建 zip：META-INF 在前 ----
 
-    private fun rezip(apk: File, entries: List<Pair<String, ByteArray>>) {
-        val tmp = File(apk.parentFile, apk.name + ".tmp")
+    private fun rezip(apk: candy.ide.fs.CandyPath, entries: List<Pair<String, ByteArray>>) {
+        val parent = apk.parent ?: throw RuntimeException("产物目录异常")
+        // 签名过程产物落在系统缓存目录（SAF 不能被 ZipFile 直接读）
+        val tmp = java.io.File(ctxCache(apk), "sign-${apk.name}.tmp")
         val manifest = buildManifest(entries)
         val (sf, rsa) = buildSignedPieces(manifest) ?: throw RuntimeException("签名初始化失败")
         val jarBytes = manifest.toByteArray(Charsets.UTF_8)
@@ -42,9 +48,11 @@ object ApkSigner {
             put(zos, "META-INF/CERT.RSA", rsa)
             for ((name, data) in entries) put(zos, name, data)
         }
-        // 原文件替换
-        if (!apk.delete()) throw RuntimeException("无法覆盖原 APK")
-        if (!tmp.renameTo(apk)) throw RuntimeException("无法写入签名后的 APK")
+        // 原文件替换：outputStream 的 "wt" 模式本身就是截断覆盖写，直接覆盖即可。
+        // SAF 上先 exists()/delete() 会让 document uri 失效（isChildDocument 找不到物理文件而抛异常），
+        // 也不能用 "rws" 之类随机写模式（provider 不支持）。
+        tmp.inputStream().use { ins -> apk.outputStream().use { out -> ins.copyTo(out) } }
+        tmp.delete()
     }
 
     private fun put(zos: java.util.zip.ZipOutputStream, name: String, data: ByteArray) {
@@ -123,7 +131,7 @@ object ApkSigner {
     }
 
     /** 从 JKS 文件加载自定义证书；失败返回原因字符串，成功返回 null */
-    fun loadJks(jksFile: java.io.File, password: CharArray): String? {
+    fun loadJks(jksFile: candy.ide.fs.CandyPath, password: CharArray): String? {
         val m = JksReader.read(jksFile, password)
         if (m == null) return "无法读取 JKS（密码错误或格式不受支持）"
         if (!m.key.algorithm.equals("RSA", true)) return "仅支持 RSA 密钥"

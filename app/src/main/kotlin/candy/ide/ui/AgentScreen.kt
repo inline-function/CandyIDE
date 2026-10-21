@@ -158,12 +158,6 @@ fun AgentScreen(vm: CandyViewModel) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = CandyText)
                 }
                 Text("助手", color = CandyText, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-                if (sending) {
-                    Spacer(Modifier.size(6.dp))
-                    CircularProgressIndicator(modifier = Modifier.size(10.dp), color = CandyPrimary, strokeWidth = 2.dp)
-                    Spacer(Modifier.size(4.dp))
-                    Text(agentStatusLabel(vm.agentStage.value), color = CandyPrimary, fontSize = 11.sp)
-                }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { scope.launch { drawerState.open() } }) {
                     Icon(Icons.Default.History, contentDescription = "往期对话", tint = CandySecondary)
@@ -204,6 +198,29 @@ fun AgentScreen(vm: CandyViewModel) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
             ) {
                 items(vm.chat) { msg -> ChatBubble(msg) { option -> input = option } }
+                // 正在生成：助手气泡位置显示加载图标 + 阶段文案（不占顶栏）
+                if (sending) {
+                    item {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                color = CandySurface,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(0.6f),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("助手", color = CandySecondary, fontSize = 11.sp)
+                                    Spacer(Modifier.size(8.dp))
+                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
+                                    Spacer(Modifier.size(8.dp))
+                                    Text(agentStatusLabel(vm.agentStage.value), color = CandyTextDim, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -217,8 +234,13 @@ fun AgentScreen(vm: CandyViewModel) {
                     value = input,
                     onValueChange = { input = it },
                     enabled = !sending,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = {
+                    // 单行：IME 回车才走 IME_ACTION_SEND（否则部分输入法插换行）
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                        autoCorrect = false,
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = {
                         val text = input.trim()
                         if (text.isNotEmpty() && !sending) { input = ""; vm.askAgent(ctx, text) }
                     }),
@@ -331,7 +353,7 @@ fun AgentScreen(vm: CandyViewModel) {
             text = {
                 Column {
                     InfoLine("工作区", proj?.name ?: "未打开工程")
-                    InfoLine("路径", proj?.absolutePath ?: "-")
+                    InfoLine("路径", proj?.key ?: "-")
                     InfoLine("当前文件", vm.currentFile.value?.name ?: "无")
                     Spacer(Modifier.size(6.dp))
                     InfoLine("Shizuku", shizuku)
@@ -380,8 +402,36 @@ private fun ChatBubble(msg: ChatMessage, onPickOption: (String) -> Unit) {
                 )
                 Spacer(Modifier.size(4.dp))
                 Text(msg.text, color = CandyText, fontSize = 13.sp)
+                // 模型用 JSON 提问（真问题）→ 对话框形式呈现问题与选项
+                val question = parseQuestion(msg.text)
+                var answered by remember { mutableStateOf(false) }
+                if (question != null) {
+                    Spacer(Modifier.size(6.dp))
+                    TextButton(onClick = { answered = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("模型提了个问题，点击查看", color = CandyPrimary, fontSize = 12.sp)
+                    }
+                    if (question != null && answered) {
+                        AlertDialog(
+                            onDismissRequest = { answered = false },
+                            title = { Text(question.question) },
+                            text = {
+                                Column {
+                                    question.options.forEach { opt ->
+                                        TextButton(
+                                            onClick = { answered = false; onPickOption(opt) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) { Text(opt, color = CandyPrimary, fontSize = 13.sp) }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { answered = false }) { Text("稍后再答") }
+                            },
+                        )
+                    }
+                }
                 // 模型给出选项（【选项：A|B|C】）：渲染成可点按钮，点了填入输入框
-                val options = parseOptions(msg.text)
+                val options = if (question == null) parseOptions(msg.text) else null
                 if (options != null) {
                     Spacer(Modifier.size(6.dp))
                     options.forEach { opt ->
@@ -397,12 +447,37 @@ private fun ChatBubble(msg: ChatMessage, onPickOption: (String) -> Unit) {
 
 private val OPTION_TAG = Regex("【选项[：:](.+?)】")
 
+/** 结构化提问：JSON 形式的「问题 + 选项」 */
+private data class ModelQuestion(val question: String, val options: List<String>)
+
 /** 模型若用 【选项：A|B|C】 标记，解析成选项列表 */
 private fun parseOptions(text: String): List<String>? {
     val m = OPTION_TAG.find(text) ?: return null
     val list = m.groupValues[1].split("|").map { it.trim() }.filter { it.isNotEmpty() }
     return if (list.size in 2..6) list else null
 }
+
+/**
+ * 模型用 JSON 提问时解析成「问题 + 选项」（必须是真问题：含问号或疑问词且给了选项）。
+ * 话题引导语句（「我们来看看……」「接下来聊聊……」一类）不匹配，不弹窗。
+ */
+private fun parseQuestion(text: String): ModelQuestion? = runCatching {
+    val trimmed = text.trim()
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return@runCatching null
+    val json = org.json.JSONObject(trimmed)
+    val q = json.optString("question").ifBlank { json.optString("q") }.trim()
+    val rawOptions = json.optJSONArray("options") ?: json.optJSONArray("choices")
+    if (q.isBlank() || rawOptions == null || rawOptions.length() !in 2..6) return@runCatching null
+    // 只要真问题：以问号结尾或含疑问词；排除「我们继续/来聊聊」式引导
+    val isQuestion = q.endsWith("？") || q.endsWith("?") ||
+        listOf("吗", "哪个", "哪种", "要不要", "是否", "选择", "想要").any { q.contains(it) }
+    if (!isQuestion) return@runCatching null
+    val opts = (0 until rawOptions.length()).mapNotNull { i ->
+        (rawOptions.opt(i) as? String)?.trim()?.takeIf { it.isNotBlank() }
+    }
+    if (opts.size !in 2..6) return@runCatching null
+    ModelQuestion(q, opts)
+}.getOrNull()
 
 private fun agentStatusLabel(stage: String): String {
     if (stage.isBlank()) return "思考中"

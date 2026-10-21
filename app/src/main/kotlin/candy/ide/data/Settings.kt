@@ -29,6 +29,8 @@ object Settings {
     var agentModel by mutableStateOf("Atria-Dawn-Preview")
     var agentKey by mutableStateOf("sk-fc709e80739f2ed067823f527cdedc560550948f9f7d70b7743beef5ad4e4f64")
     var agentPrompt by mutableStateOf("")   // 初始提示词；空则用内置默认
+var agentTemperature by mutableStateOf(1.0f)   // 采样温度 0~2
+var agentStream by mutableStateOf(true)   // 流式输出（SSE）
 
     /** 首次拿到 Context 后加载；同时把当前配色方案从磁盘恢复 */
     fun attach(ctx: Context) {
@@ -50,6 +52,8 @@ object Settings {
                 props.getProperty("agentKey")?.let { if (it.isNotBlank()) agentKey = it }
                 agentEnabled = props.getProperty("agentEnabled") == "true"
     props.getProperty("agentPrompt")?.let { agentPrompt = it }
+    props.getProperty("agentTemperature")?.toFloatOrNull()?.let { agentTemperature = it.coerceIn(0f, 2f) }
+    props.getProperty("agentStream")?.toBooleanStrictOrNull()?.let { agentStream = it }
             }
         }
         Schemes.current = Schemes.byId(ctx, schemeId)
@@ -70,6 +74,8 @@ object Settings {
                 setProperty("agentKey", agentKey)
                 setProperty("agentEnabled", agentEnabled.toString())
     setProperty("agentPrompt", agentPrompt)
+        setProperty("agentTemperature", agentTemperature.toString())
+        setProperty("agentStream", agentStream.toString())
             }
             props.store(f.outputStream(), "CandyIDE settings")
         }

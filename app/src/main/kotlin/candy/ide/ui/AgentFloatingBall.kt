@@ -178,42 +178,46 @@ private fun MiniChatWindow(
             .background(FloatBg)
             .padding(10.dp),
     ) {
-        // 标题行：模型名 / 全屏 / 关闭（按住拖动整窗）
+        // 标题行：模型名 / 全屏 / 关闭（按住「助手」标识拖动整窗；右侧按钮不被拖动拦截）
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { }, 
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        onDrag(dragAmount.x, dragAmount.y)
-                    },
-                )
-            },
         ) {
-            Icon(Icons.Default.SmartToy, contentDescription = null, tint = BubbleColor, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.size(5.dp))
-            Text("助手", color = Color.White, fontSize = 11.sp)
-            // 发送中：助手旁显示状态 + 转圈（思考中/阅读中/编辑中/操作中）
-            if (sending) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { }, 
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            onDrag(dragAmount.x, dragAmount.y)
+                        },
+                    )
+                },
+            ) {
+                Icon(Icons.Default.SmartToy, contentDescription = null, tint = BubbleColor, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.size(5.dp))
-                CircularProgressIndicator(modifier = Modifier.size(10.dp), color = BubbleColor, strokeWidth = 2.dp)
-                Spacer(Modifier.size(3.dp))
-                Text(statusLabel(vm), color = BubbleColor, fontSize = 10.sp)
+                Text("助手", color = Color.White, fontSize = 11.sp)
+                // 发送中：助手旁显示状态 + 转圈（思考中/阅读中/编辑中/操作中）
+                if (sending) {
+                    Spacer(Modifier.size(5.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(10.dp), color = BubbleColor, strokeWidth = 1.5.dp)
+                    Spacer(Modifier.size(3.dp))
+                    Text(statusLabel(vm), color = BubbleColor, fontSize = 10.sp)
+                }
             }
             Spacer(Modifier.weight(1f))
             Icon(
                 Icons.Default.Fullscreen,
                 contentDescription = "全屏",
                 tint = FloatDim,
-                modifier = Modifier.size(20.dp).clickable(onClick = onFullScreen),
+                modifier = Modifier.size(20.dp).ballClick(onClick = onFullScreen)
             )
             Spacer(Modifier.size(8.dp))
             Icon(
                 Icons.Default.Close,
                 contentDescription = "关闭",
                 tint = FloatDim,
-                modifier = Modifier.size(20.dp).clickable(onClick = onClose),
+                modifier = Modifier.size(20.dp).ballClick(onClick = onClose)
             )
         }
         Spacer(Modifier.size(6.dp))
@@ -301,19 +305,24 @@ private fun MiniChatWindow(
             Spacer(Modifier.size(6.dp))
             Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
-                    .background(BubbleColor)
-                    .clickable {
-                        val text = input.trim()
-                        if (text.isNotEmpty() && !sending) {
-                            input = ""
-                            vm.askAgent(ctx, text)
+                    .background(if (sending) FloatDim else BubbleColor)
+                    .ballClick {
+                        if (sending) {
+                            // 生成中再点 = 终止这一轮
+                            vm.stopAgent()
+                        } else {
+                            val text = input.trim()
+                            if (text.isNotEmpty()) {
+                                input = ""
+                                vm.askAgent(ctx, text)
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("➤", color = Color.White, fontSize = 10.sp)
+                Text(if (sending) "■" else "➤", color = Color.White, fontSize = 10.sp)
             }
         }
     }
@@ -341,7 +350,7 @@ private fun QuickChip(label: String, onPick: (String) -> Unit) {
         fontSize = 11.sp,
         modifier = Modifier
             .padding(vertical = 2.dp)
-            .clickable { onPick(label) },
+            .ballClick { onPick(label) }
     )
 }
 
@@ -364,3 +373,20 @@ private fun MiniBubble(msg: ChatMessage) {
         )
     }
 }
+/** 在悬浮窗里替代 Modifier.clickable：手动检测 Press+Release（clickable 的事件链在悬浮窗里会被打断） */
+@Composable
+fun Modifier.ballClick(onClick: () -> Unit): Modifier = this.then(
+    // 按下即触发：悬浮窗里 click 的 down→up 序列会被 IME 开关引发的重组打断
+    Modifier.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val e = awaitPointerEvent()
+                if (e.type == PointerEventType.Press) {
+                    e.changes.firstOrNull()?.consume()
+                    onClick()
+                }
+            }
+        }
+    },
+)
+

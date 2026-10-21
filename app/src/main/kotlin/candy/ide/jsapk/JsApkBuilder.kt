@@ -23,9 +23,9 @@ data class JsApkConfig(
         const val DEFAULT_PACKAGE = "candy.jsapk.runtime"
 
         /** 读工程目录里的 jsapk.json；缺字段走默认 */
-        fun load(project: File): JsApkConfig {
-            val f = java.io.File(project, "jsapk.json")
-            if (!f.isFile) return JsApkConfig()
+        fun load(project: candy.ide.fs.CandyPath): JsApkConfig {
+            val f = project.find("jsapk.json")
+            if (f?.isFile() != true) return JsApkConfig()
             return runCatching {
                 val j = org.json.JSONObject(f.readText())
                 JsApkConfig(
@@ -42,7 +42,7 @@ data class JsApkConfig(
         }
 
         /** 落盘（非法包名返回 false） */
-        fun save(project: File, cfg: JsApkConfig): Boolean {
+        fun save(project: candy.ide.fs.CandyPath, cfg: JsApkConfig): Boolean {
             if (!AxmlEditor.validPackage(cfg.pkg)) return false
             val j = org.json.JSONObject()
             j.put("entry", cfg.entry)
@@ -53,7 +53,7 @@ data class JsApkConfig(
             if (cfg.icon != null) j.put("icon", cfg.icon)
             if (cfg.certPath != null) j.put("certPath", cfg.certPath)
             if (cfg.certPass != null) j.put("certPass", cfg.certPass)
-            java.io.File(project, "jsapk.json").writeText(j.toString(2))
+            project.child("jsapk.json").writeText(j.toString(2))
             return true
         }
     }
@@ -73,8 +73,9 @@ object JsApkBuilder {
     internal const val TEMPLATE_VERSION = 3
 
     /** 编译入口文件并打包：返回产物路径 */
-    fun build(ctx: Context, entryFile: File, cfg: JsApkConfig, onCompiled: ((Long) -> Unit)? = null): File {
+    fun build(ctx: Context, entryFile: candy.ide.fs.CandyPath, cfg: JsApkConfig, onCompiled: ((Long) -> Unit)? = null): candy.ide.fs.CandyPath {
         ApkSigner.attach(ctx.applicationContext)
+        ApkSigner.attachCache(ctx.cacheDir)
 
         // 1) 编译 .subl → JS
         val js = Engine.compileToJs(ctx, entryFile, onCompiled)
@@ -124,9 +125,9 @@ object JsApkBuilder {
         // 4b) 自定义图标：替换模板里的图像资源。aapt2 把 res 路径压缩成 res/xx.png 的短名，
         // 当前模板的 res png 全部是启动图标（4 密度 × launcher/round），整体替换即可；
         // 模板若新增别的 drawable，需要按 arsc 精确匹配再改这里。
-        val iconFile = cfg.icon?.let { File(entryFile.parentFile, it) }
-        if (iconFile != null && iconFile.isFile) {
-            val iconBytes = iconFile.readBytes()
+        val iconFile = cfg.icon?.let { entryFile.parent?.find(it) }
+        if (iconFile?.isFile() == true) {
+            val iconBytes = iconFile.inputStream().use { it.readBytes() }
             for (i in entries.indices) {
                 val n = entries[i].first
                 if (n.startsWith("res/") && n.endsWith(".png")) entries[i] = n to iconBytes
@@ -134,17 +135,20 @@ object JsApkBuilder {
         }
 
         // 5) 输出目录 + 重写并签名
-        val outDir = File(entryFile.parentFile, "build")
-        if (!outDir.exists()) outDir.mkdirs()
-        val apk = File(outDir, "app.apk")
-        if (apk.exists()) apk.delete()
-        tmp.copyTo(apk, overwrite = true)
+        val parent = entryFile.parent ?: throw RuntimeException("入口目录异常")
+        // SAF 上对未存在文件的 exists()/delete() 可能抛 FileNotFoundException 而非返回 false，
+        // 全程 runCatching 兜底；写入前先 createNewFile 建出真实文件
+        // 只有确实没有 build 时才 createDirectory，否则 SAF 会生成 "build (1)"…
+        val outDir = parent.find("build") ?: parent.createDirectory("build")
+            ?: throw RuntimeException("无法创建 build 目录")
+        val apk = outDir.child("app.apk")
+        tmp.inputStream().use { ins -> apk.outputStream().use { out -> ins.copyTo(out) } }
         ApkSigner.signV1(apk, entries)
         return apk
     }
 
     /** 用 Shizuku 以 shell 身份流式静默安装；返回(是否走 Shizuku, 输出) */
-    fun installViaShizuku(apk: File): Pair<Boolean, String> {
+    fun installViaShizuku(apk: candy.ide.fs.CandyPath): Pair<Boolean, String> {
         if (!Shizuku.pingBinder() || Shizuku.isPreV11()) return false to "未连接 Shizuku"
         val out = ShizukuShell.installStream(apk) ?: return false to "Shizuku 接口不可用"
         return true to (if (out.isEmpty()) "已安装" else out)

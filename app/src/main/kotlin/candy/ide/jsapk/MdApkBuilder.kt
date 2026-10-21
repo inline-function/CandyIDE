@@ -17,16 +17,17 @@ object MdApkBuilder {
     private const val VIEWER_ASSET = "sdk/md/viewer.js"
 
     /** 打包 md 文档工程：返回产物 apk。无 .md 抛异常。 */
-    fun build(ctx: Context, project: File, cfg: JsApkConfig, onCollected: ((Int) -> Unit)? = null): File {
+    fun build(ctx: Context, project: candy.ide.fs.CandyPath, cfg: JsApkConfig, onCollected: ((Int) -> Unit)? = null): candy.ide.fs.CandyPath {
         ApkSigner.attach(ctx.applicationContext)
+        ApkSigner.attachCache(ctx.cacheDir)
 
         // 1) 收集工程内全部 .md（相对工程根的路径做键，排序保证多次打包条目稳定）
         val docs = LinkedHashMap<String, String>()
-        project.walkTopDown().filter { it.isFile && it.name.endsWith(".md") }.sortedBy { it.relativeTo(project).path }
-            .forEach { f ->
-                runCatching { docs[f.relativeTo(project).path] = f.readText() }
-            }
-        if (docs.isEmpty()) throw RuntimeException("工程里没有 .md 文档")
+        // 相对路径收集（SAF 也可），按相对路径排序保证多次打包条目稳定
+        for ((f, rel) in project.walkRelative()) {
+            if (rel.isBlank() || !rel.endsWith(".md")) continue
+            runCatching { docs[rel.replace('\\', '/')] = f.readText() }
+        }
         onCollected?.invoke(docs.size)
 
         // 2) 阅读器壳：viewer.js 模板 + 内联文档数据（避免运行期网络/文件访问）
@@ -75,11 +76,16 @@ object MdApkBuilder {
         }
 
         // 5) 输出 + 签名
-        val outDir = File(project, "build")
-        if (!outDir.exists()) outDir.mkdirs()
-        val apk = File(outDir, "app.apk")
-        if (apk.exists()) apk.delete()
-        tmp.copyTo(apk, overwrite = true)
+        // SAF 上对未存在文件的 exists()/delete() 可能抛 FileNotFoundException 而非返回 false，
+        // 全程 runCatching 兜底；写入前先 createNewFile 建出真实文件
+        // find 命中即用：SAF 的 listFiles 对已存在目录能找到；
+        // 只有确实没有时才 createDirectory，否则会生成 "build (1)"、"build (2)"…
+        val outDir = project.find("build") ?: project.createDirectory("build")
+            ?: throw RuntimeException("无法创建 build 目录")
+        // child() 内部在文件不存在时会 createFile 建出真实文件；
+        // 不能用 createNewFile（SAF 实现会在 build/ 里建名为 "build" 的空文件）
+        val apk = outDir.child("app.apk")
+        tmp.inputStream().use { ins -> apk.outputStream().use { out -> ins.copyTo(out) } }
         ApkSigner.signV1(apk, entries)
         return apk
     }

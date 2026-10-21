@@ -133,7 +133,7 @@ fun EditorScreen(vm: CandyViewModel) {
     val isJsApk = remember(currentProject) { currentProject?.let { ProjectStore.typeOf(it) } == ProjectStore.TYPE_JSAPK }
     // md 预览渲染时编辑器实例是上个标签页的：保存/运行要挡住；md 文本模式下可编辑
     val isEditableFile = safe != null && !isMdProject &&
-        (!safe.name.endsWith(".md") || vm.mdTextMode[safe.absolutePath] == true)
+        (!safe.name.endsWith(".md") || vm.mdTextMode[safe.key] == true)
     var longMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var quickMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var diagInfo by remember { mutableStateOf<candy.ide.data.DiagItem?>(null) }
@@ -145,7 +145,7 @@ fun EditorScreen(vm: CandyViewModel) {
     var editorSize by remember { mutableStateOf(IntSize.Zero) }
     var fixPopup by remember { mutableStateOf(false) }
     // 外部修改检测：文件签（黄条）—— 文件被外部改动时提示同步或覆盖
-    var externalChange by remember { mutableStateOf<File?>(null) }
+    var externalChange by remember { mutableStateOf<candy.ide.fs.CandyPath?>(null) }
     // 记录每个打开文件最近一次我们这边写盘/载入时的 mtime，用于判断外部改动
     val knownMtimes = remember { androidx.compose.runtime.mutableStateMapOf<String, Long>() }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
@@ -156,19 +156,23 @@ fun EditorScreen(vm: CandyViewModel) {
     LaunchedEffect(vm.resumeNonce.intValue, safe) {
         val f = safe
         if (f == null) { externalChange = null; return@LaunchedEffect }
-        val known = knownMtimes[f.absolutePath]
+        val known = knownMtimes[f.key]
         val disk = runCatching { f.lastModified() }.getOrDefault(0L)
         when {
             // 切换文件：先清旧标记（这个 effect 因 safe 变化而重跑）
-            known == null -> { knownMtimes[f.absolutePath] = disk; externalChange = null }
-            // 已知 mtime 且磁盘更新 → 外部修改
-            disk > known && disk > 0 -> externalChange = f
+            known == null -> { knownMtimes[f.key] = disk; externalChange = null }
+            // 已知 mtime 且磁盘更新：
+            // 编辑器里有未保存改动才弹条让用户决策（同步/覆盖）；没改过则磁盘即最新，静默跟随
+            disk > known && disk > 0 -> {
+                if (vm.dirtyTexts[f.key] == true) externalChange = f
+                else { knownMtimes[f.key] = disk; externalChange = null }
+            }
         }
     }
     // 每次 sora 里保存/载入后同步 mtime（由 SoraEditorView 的保存回调驱动）
     LaunchedEffect(vm.savedTextsVersion.intValue, safe) {
         val f = safe ?: return@LaunchedEffect
-        runCatching { knownMtimes[f.absolutePath] = f.lastModified() }.getOrNull()
+        runCatching { knownMtimes[f.key] = f.lastModified() }.getOrNull()
         externalChange = null
     }
 
@@ -433,7 +437,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                     onClick = { vm.selectTab(i) },
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            val dirtyStar = vm.dirtyTexts.containsKey(f.absolutePath)
+                                            val dirtyStar = vm.dirtyTexts.containsKey(f.key)
                                             if (dirtyStar) {
                                                 Text(
                                                     "*",
@@ -500,7 +504,7 @@ fun EditorScreen(vm: CandyViewModel) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("从左侧文件树选择一个文件", color = CandyTextDim)
                             }
-                        } else if (active.name.endsWith(".md") && vm.mdTextMode[active.absolutePath] != true) {
+                        } else if (active.name.endsWith(".md") && vm.mdTextMode[active.key] != true) {
                             val src = remember(active) { runCatching { active.readText() }.getOrDefault("") }
                             MarkdownText(
                                 src,
@@ -586,9 +590,9 @@ fun EditorScreen(vm: CandyViewModel) {
                             }
                         }
                         if (active != null && active.name.endsWith(".md", ignoreCase = true)) {
-                            val rendering = vm.mdTextMode[active.absolutePath] != true
+                            val rendering = vm.mdTextMode[active.key] != true
                             androidx.compose.material3.SmallFloatingActionButton(
-                                onClick = { vm.mdTextMode[active.absolutePath] = rendering },
+                                onClick = { vm.mdTextMode[active.key] = rendering },
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .padding(end = 12.dp, top = 10.dp)
@@ -1190,7 +1194,7 @@ private fun goToDefinition(vm: CandyViewModel, editor: CodeEditor, line: Int, co
     val word = wordAt(editor, line, col) ?: return vm.mdLogUser("**[转到定义]** 光标处没有标识符")
     val project = vm.currentProject.value ?: return vm.mdLogUser("**[转到定义]** 未打开工程")
     val pattern = Regex("\\b(fun|val|var|class|struct|enum)\\s+" + Regex.escape(word) + "\\b")
-    val files = project.walkTopDown().filter { it.isFile && it.extension in setOf("subl", "subs") }
+    val files = project.walk().filter { it.isFile() && it.extension in setOf("subl", "subs") }
     for (f in files) {
         val src = runCatching { f.readText() }.getOrNull() ?: continue
         val m = pattern.find(src) ?: continue

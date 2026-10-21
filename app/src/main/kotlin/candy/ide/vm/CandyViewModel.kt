@@ -30,6 +30,8 @@ import sugared.functor.lsp.LspAnalysis
 import sugared.functor.lsp.Position
 import sugared.functor.lsp.Range
 import sugared.functor.lsp.TextEdit
+import candy.ide.fs.CandyFs
+import candy.ide.fs.CandyPath
 import java.io.File
 import java.util.concurrent.Executors
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,22 +44,22 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     private val main = Handler(Looper.getMainLooper())
 
     val screen = mutableStateOf(Screen.Projects)
-    val projects = mutableStateListOf<File>()
-    val currentProject = mutableStateOf<File?>(null)
-    val currentFile = mutableStateOf<File?>(null)
+    val projects = mutableStateListOf<CandyPath>()
+    val currentProject = mutableStateOf<CandyPath?>(null)
+    val currentFile = mutableStateOf<CandyPath?>(null)
     val logOpen = mutableStateOf(false)
     /** 本次运行是否失败（编译/执行报错）：日志页标红、不跳输出页 */
     val runFailed = mutableStateOf(false)
     val running = mutableStateOf(false)
 
     // 多标签页：openFiles 是已打开文件，currentFile 永远 = 活动标签页
-    val openFiles = mutableStateListOf<File>()
+    val openFiles = mutableStateListOf<CandyPath>()
     val activeIndex = mutableIntStateOf(0)
     val treeVersion = mutableIntStateOf(0)
     // 页面恢复（ON_RESUME）/ agent 回复完毕：驱动编辑页检测外部修改、重建文件树
     val resumeNonce = mutableIntStateOf(0)
     // 文件树剪贴板：复制/剪切 → 粘贴到目录
-    val clipFile = mutableStateOf<File?>(null)
+    val clipFile = mutableStateOf<CandyPath?>(null)
     var clipCut = false
         private set
     // md 打开模式：true=纯文本编辑，false=Markdown 渲染
@@ -72,7 +74,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     val pendingFormatEdits = mutableStateListOf<Pair<Range, String>>()  // 格式化编辑（LSP Range → 新文本）
     // 退出工程确认 / 打包完成待安装
     val exitGuard = mutableStateOf(false)
-    val pendingApk = mutableStateOf<File?>(null)
+    val pendingApk = mutableStateOf<CandyPath?>(null)
     private val pendingPkg = mutableStateOf<String?>(null)
     val installing = mutableStateOf(false)
     /** 工程导出等待框 */
@@ -90,7 +92,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     val installedPkg = mutableStateOf<String?>(null)
     val installError = mutableStateOf<String?>(null)
     // 工程设置页的工程
-    val settingsProject = mutableStateOf<File?>(null)
+    val settingsProject = mutableStateOf<CandyPath?>(null)
 
     // 设置（配色方案/字号/换行）：Settings 落盘 + 编辑器/分析器读最新值
     val schemeVersion = mutableIntStateOf(0)
@@ -165,7 +167,10 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     /** 编辑器每跑完一轮 Lexer 就把最新正文送进来：同步文档并刷新诊断。 */
     /** 分析器回调：同步给 LSP，并返回 semanticTokens 供编辑器着色 */
     fun onAnalyzed(text: String): List<Int>? {
-        val name = currentFile.value?.name ?: return null
+        val f = currentFile.value ?: return null
+        // md 文档不做 Sublimation 语言服务：没有源代码，诊断与语义高亮无意义
+        if (f.extension == "md") return null
+        val name = f.name
         if (text.length > MAX_LSP_SOURCE) return null
         val analysis = analysis() ?: return null
         var tokens: List<Int>? = null
@@ -245,8 +250,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 ProjectStore.writeType(dir, type)
                 when (type) {
                     ProjectStore.TYPE_JSAPK -> {
-                        File(dir, "hello.subl").writeText(DEMO_SOURCE)
-                        File(dir, "jsapk.json").writeText(
+                        dir.child("hello.subl").writeText(DEMO_SOURCE)
+                        dir.child("jsapk.json").writeText(
                             buildString {
                                 append("{\n")
                                 append("  \"entry\": \"hello.subl\",\n")
@@ -256,19 +261,23 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         )
                     }
-                    ProjectStore.TYPE_SCRIPT -> File(dir, "hello.subs").writeText(SCRIPT_DEMO_SOURCE)
-                    else -> File(dir, "hello.subl").writeText(DEMO_SOURCE)
+                    ProjectStore.TYPE_SCRIPT -> dir.child("hello.subs").writeText(SCRIPT_DEMO_SOURCE)
+                    // md 文档工程：只有 md 文件，不含可执行代码
+                    ProjectStore.TYPE_MD -> {
+                        dir.child("index.md").writeText("# " + name + "\n\n在这里写文档。左侧文件树可继续新增 .md。\n\n- 支持：标题 / 列表 / 代码块 / 引用 / 链接\n- 长按顶栏运行按钮可打包成文档 APK\n")
+                    }
+                    else -> dir.child("hello.subl").writeText(DEMO_SOURCE)
                 }
-                main.post { openProject(dir) }
+                main.post { refreshProjects(); openProject(dir) }
             }
         }
     }
 
-    fun renameProject(dir: File, newName: String) {
+    fun renameProject(dir: CandyPath, newName: String) {
         io.execute {
             if (ProjectStore.rename(dir, newName)) {
                 if (currentProject.value == dir) {
-                    currentProject.value = File(dir.parentFile, newName)
+                    currentProject.value = dir.parent?.child(newName)
                     savedTexts.clear()
                     dirtyTexts.clear()
                 }
@@ -279,7 +288,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun deleteProject(dir: File) {
+    fun deleteProject(dir: CandyPath) {
         io.execute {
             dir.deleteRecursively()
             main.post {
@@ -289,14 +298,14 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openProject(dir: File) {
+    fun openProject(dir: CandyPath) {
         // 打开时间顶上去：主页工程卡按「上次打开时间」排序
         ProjectStore.touchOpened(dir)
-        val first = dir.walkTopDown()
-            .filter { it.isFile && (it.name.endsWith(".subs") || it.name.endsWith(".subl")) }
+        val first = dir.walk()
+            .filter { it.isFile() && (it.name.endsWith(".subs") || it.name.endsWith(".subl")) }
             .minByOrNull { it.name }
             // md 文档工程/内置工程：没有源文件则开第一篇 md
-            ?: dir.walkTopDown().filter { it.isFile && it.name.endsWith(".md") }.minByOrNull { it.name }
+            ?: dir.walk().filter { it.isFile() && it.name.endsWith(".md") }.minByOrNull { it.name }
         Snapshot.withMutableSnapshot {
             currentProject.value = dir
             openFiles.clear()
@@ -322,7 +331,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun openFileLine(name: String, line: Int, col: Int = 0) {
         val project = currentProject.value
         val file = if (project != null) {
-            project.walkTopDown().firstOrNull { it.isFile && it.name == name }
+            project.walk().firstOrNull { it.isFile() && it.name == name }
         } else {
             openFiles.firstOrNull { it.name == name }
         }
@@ -336,21 +345,21 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 诊断报告里的 `[3:5]` 位置补上文件名，凑成日志页可点的 `文件：行：列` */
-    private fun linkPositions(text: String, file: File?): String {
+    private fun linkPositions(text: String, file: CandyPath?): String {
         if (file == null) return text
         val n = file.name
         return text.replace(Regex("\\[(\\d+):(\\d+)\\]"), "[" + n + ":$1:$2]")
     }
 
     /** 文件树点击：进标签页（已存在则激活）。apk 直接走安装，不进编辑器 */
-    fun openFile(file: File) {
+    fun openFile(file: CandyPath) {
         if (file.name.endsWith(".apk", ignoreCase = true)) {
             installApk(file)
             return
         }
-        savedTexts.putIfAbsent(file.absolutePath, runCatching { file.readText() }.getOrDefault(""))
+        savedTexts.putIfAbsent(file.key, runCatching { file.readText() }.getOrDefault(""))
         // 单文件打开也计入「上次打开时间」（主页排序用它）
-        ProjectStore.touchOpened(file.parentFile ?: file)
+        ProjectStore.touchOpened(file.parent ?: file)
         val idx = openFiles.indexOf(file)
         if (idx >= 0) selectTab(idx)
         else Snapshot.withMutableSnapshot {
@@ -360,26 +369,26 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 编辑器正文加载源：有未保存修改的标签页保留修改过的正文，否则读磁盘 */
-    fun loadTextFor(file: File): String =
-        dirtyTexts[file.absolutePath]?.let { savedTexts[file.absolutePath] } ?: file.readText()
+    fun loadTextFor(file: CandyPath): String =
+        dirtyTexts[file.key]?.let { savedTexts[file.key] } ?: file.readText()
 
     /** 正文每次变更：与落盘副本比对，决定脏标记 */
     fun onEditorTextChanged(text: String) {
         val f = currentFile.value ?: return
-        val dirty = savedTexts[f.absolutePath] != text
+        val dirty = savedTexts[f.key] != text
         if (dirty) {
-            savedTexts[f.absolutePath] = text
-            dirtyTexts[f.absolutePath] = true
+            savedTexts[f.key] = text
+            dirtyTexts[f.key] = true
         } else {
-            dirtyTexts.remove(f.absolutePath)
+            dirtyTexts.remove(f.key)
         }
     }
 
     /** 外部修改同步：丢弃内存正文，强制从磁盘重载（编辑器侧随即重读）。 */
     fun reloadCurrentFromDisk() {
         val f = currentFile.value ?: return
-        dirtyTexts.remove(f.absolutePath)
-        savedTexts.remove(f.absolutePath)
+        dirtyTexts.remove(f.key)
+        savedTexts.remove(f.key)
         forceReloadNonce.intValue++
         mdLogUser("**[同步]** 已用磁盘内容替换 `" + f.name + "`")
     }
@@ -391,32 +400,32 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // 未保存修改时的关页签确认对象
-    val closeGuard = mutableStateOf<File?>(null)
+    val closeGuard = mutableStateOf<CandyPath?>(null)
 
     /** 关页签：有未保存修改先弹确认，由 EditorScreen 渲染对话框 */
     fun closeTabChecked(i: Int) {
         val f = openFiles.getOrNull(i) ?: return
-        if (dirtyTexts[f.absolutePath] == true) closeGuard.value = f
+        if (dirtyTexts[f.key] == true) closeGuard.value = f
         else closeTab(i)
     }
 
     fun cancelCloseTab() { closeGuard.value = null }
 
-    fun saveAndCloseTab(file: File) {
-        val text = savedTexts[file.absolutePath]
+    fun saveAndCloseTab(file: CandyPath) {
+        val text = savedTexts[file.key]
         if (text != null) {
-            savedTexts[file.absolutePath] = text
+            savedTexts[file.key] = text
             io.execute { runCatching { file.writeText(text) } }
         }
-        dirtyTexts.remove(file.absolutePath)
+        dirtyTexts.remove(file.key)
         closeGuard.value = null
         val idx = openFiles.indexOf(file)
         if (idx >= 0) closeTab(idx)
     }
 
-    fun discardAndCloseTab(file: File) {
-        dirtyTexts.remove(file.absolutePath)
-        savedTexts.remove(file.absolutePath)
+    fun discardAndCloseTab(file: CandyPath) {
+        dirtyTexts.remove(file.key)
+        savedTexts.remove(file.key)
         closeGuard.value = null
         val idx = openFiles.indexOf(file)
         if (idx >= 0) closeTab(idx)
@@ -471,7 +480,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun goSettings() { screen.value = Screen.Settings }
     fun goIdeLog() { ensureIdeLogLoaded(); screen.value = Screen.IdeLog }
-    fun goProjectSettings(dir: File) {
+    fun goProjectSettings(dir: CandyPath) {
         settingsProject.value = dir
         screen.value = Screen.ProjectSettings
     }
@@ -494,7 +503,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         if (agentBusy.value) return
         if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext)
         agent!!.apply {
-            tools.currentFile = currentFile.value?.absolutePath
+            tools.currentFile = currentFile.value
             tools.currentProjectDir = currentProject.value
             tools.diagnostics = diagnostics.toList()
         }
@@ -521,6 +530,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                mdLogUser("**[agent]** 异常: " + (e.message ?: e.javaClass.simpleName))
                 chat.add(ChatMessage(ChatMessage.Role.MODEL, "调用失败：" + (e.message ?: e.toString())))
             } finally {
                 agentBusy.value = false
@@ -612,13 +622,13 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 在工程内生成自签名 jks 证书；成功返回相对路径，失败返回原因 */
-    fun generateCert(project: File, alias: String, pass: String, cn: String, years: Int): String {
+    fun generateCert(project: CandyPath, alias: String, pass: String, cn: String, years: Int): String {
         if (alias.isBlank()) return "别名不能为空"
         if (pass.length < 6) return "密码至少 6 位"
         if (cn.isBlank()) return "CN 不能为空"
         val name = alias.trim() + ".jks"
-        val d = File(project, "certificates").apply { mkdirs() }
-        val target = File(d, name)
+        val d = project.find("certificates") ?: project.createDirectory("certificates")!!
+        val target = d.find(name) ?: d.child(name)
         val r = candy.ide.jsapk.JksWriter.generate(target, alias.trim(), pass.toCharArray(), cn.trim(), years.coerceIn(1, 30))
         return r.fold(
             onSuccess = { "certificates/" + name },
@@ -628,24 +638,39 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
 
     /** 解压归档到同名目录（工程内），完成后刷新文件树 */
-    fun extractArchive(file: File) {
+    fun extractArchive(file: CandyPath) {
         toast.value = "正在解压 " + file.name + "…"
         io.execute {
-            val out = File(file.parentFile, file.nameWithoutExtension)
+            val parent = file.parent
+            val out = parent?.find(file.nameWithoutExtension)
+                ?: parent?.createDirectory(file.nameWithoutExtension)
+            if (out == null) {
+                mdLogUser("**[解压失败]** 无法创建输出目录")
+                return@execute
+            }
+            val outRoot = out!!
             var n = 0
             val ok = runCatching {
-                java.util.zip.ZipFile(file).use { zf ->
-                    out.mkdirs()
-                    val entries = zf.entries()
-                    while (entries.hasMoreElements()) {
-                        val e = entries.nextElement()
-                        if (e.isDirectory) continue
-                        val f = File(out, e.name)
-                        // 防 Zip Slip
-                        if (!f.absolutePath.startsWith(out.absolutePath)) continue
-                        f.parentFile?.mkdirs()
-                        zf.getInputStream(e).use { ins -> f.outputStream().use { o -> ins.copyTo(o) } }
-                        n++
+                // 流式读 zip：SAF 路径也能走 inputStream
+                java.util.zip.ZipInputStream(file.inputStream()).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory()) {
+                            // 路径段（防 Zip Slip：丢弃回退段）
+                            val segs = entry.name.split('/').filter { it.isNotBlank() && it != ".." }
+                            var cur = outRoot
+                            for (i in segs.dropLast(1).indices) {
+                                val dirSeg = cur.find(segs[i]) ?: cur.createDirectory(segs[i])
+                                    ?: throw RuntimeException("无法创建目录 " + segs[i])
+                                cur = dirSeg
+                            }
+                            val last = segs.last()
+                            val target = cur.find(last) ?: cur.child(last)
+                            target.outputStream().use { o -> zis.copyTo(o) }
+                            n++
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
                     }
                 }
             }.isSuccess
@@ -661,12 +686,12 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
 
     /** 把外部选中的 .jks 复制进工程 certificates/，返回相对路径 */
-    fun importCertInto(project: File, uri: android.net.Uri): String? {
+    fun importCertInto(project: CandyPath, uri: android.net.Uri): String? {
         return runCatching {
             val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null }
                 ?: ("cert-" + System.currentTimeMillis() + ".jks")
-            val d = File(project, "certificates").apply { mkdirs() }
-            val target = File(d, name)
+            val d = project.find("certificates") ?: project.createDirectory("certificates")!!
+            val target = d.find(name) ?: d.child(name)
             getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use { ins ->
                 target.outputStream().use { o -> ins.copyTo(o) }
             } ?: return null
@@ -680,7 +705,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         main.post { ingesting.value = true }
         io.execute {
             val name = runCatching { uri.lastPathSegment ?: "" }.getOrDefault("")
-            val res = runCatching {
+            val res = runCatching<String> {
                 val app = getApplication<android.app.Application>()
                 val root = candy.ide.engine.Engine.root(app)
                 when {
@@ -697,18 +722,26 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                         "证书已导入：" + name + "（打包时可选用）"
                     }
                     name.endsWith(".capr") -> {
-                        val d = java.io.File(root, "projects").apply { mkdirs() }
+                        val proot = ProjectStore.projectsRoot(app)
                         val pname = name.removeSuffix(".capr")
-                        val out = java.io.File(d, pname)
-                        out.mkdirs()
+                        val out = proot.find(pname) ?: proot.createDirectory(pname)
+                        if (out == null) return@runCatching "**[工程导入失败]** 无法创建 " + pname
                         app.contentResolver.openInputStream(uri)?.use { ins ->
                             java.util.zip.ZipInputStream(ins).use { zis ->
                                 while (true) {
                                     val e = zis.nextEntry ?: break
-                                    if (!e.isDirectory) {
-                                        val f = java.io.File(out, e.name)
-                                        f.parentFile?.mkdirs()
-                                        f.outputStream().use { o -> zis.copyTo(o) }
+                                    if (!e.isDirectory()) {
+                                        val segs = e.name.split('/').filter { it.isNotBlank() && it != ".." }
+                                        var cur = out!!
+                                        for (i in segs.dropLast(1).indices) {
+                                            val dirSeg = cur.find(segs[i]) ?: cur.createDirectory(segs[i])
+                                            if (dirSeg == null) break
+                                            cur = dirSeg
+                                        }
+                                        if (segs.isNotEmpty()) {
+                                            val target = cur.find(segs.last()) ?: cur.child(segs.last())
+                                            target.outputStream().use { o -> zis.copyTo(o) }
+                                        }
                                     }
                                     zis.closeEntry()
                                 }
@@ -748,15 +781,15 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 导出工程：整个工程目录压成 .capr（SAF 输出目标 uri） */
-    fun exportProjectArchive(dir: File, uri: android.net.Uri) {
+    fun exportProjectArchive(dir: CandyPath, uri: android.net.Uri) {
         main.post { archiving.value = true }
         io.execute {
             runCatching {
-                val base = dir.absolutePath
+                val base = dir.key
                 getApplication<android.app.Application>().contentResolver.openOutputStream(uri)?.use { os ->
                     java.util.zip.ZipOutputStream(os).use { zos ->
-                        dir.walkTopDown().filter { it.isFile }.forEach { f ->
-                            val rel = f.absolutePath.removePrefix(base).trimStart('/')
+                        dir.walk().filter { it.isFile() }.forEach { f ->
+                            val rel = f.key.removePrefix(base).trimStart('/')
                             // build 目录不打包
                             if (!rel.startsWith("build/")) {
                                 zos.putNextEntry(java.util.zip.ZipEntry(rel))
@@ -772,6 +805,58 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 关闭 IDE：结束全部 Activity 并杀掉自己的进程（Android 会保留冷启动入口）。 */
+    fun closeIde(ctx: android.content.Context) {
+        stopAgent()
+        (ctx as? android.app.Activity)?.finishAffinity()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
+    /** 重置 IDE：删除整个 IDE 目录与私有应用数据，仅保留已授予的目录权限，然后冷启动。 */
+    fun resetIde(ctx: android.content.Context) {
+        io.execute {
+            runCatching { candy.ide.fs.CandyFs.wipeWorkspace(ctx) }
+            runCatching { candy.ide.fs.CandyFs.resetMigrationFlag(ctx) }
+            // 私有数据：内置工程 / 日志 / agent 会话 / sdk 缓存（保留设置不动）
+            listOf("builtin", "logs", "agent", "core", "stdlib", "sdk").forEach { d ->
+                runCatching { java.io.File(candy.ide.engine.Engine.root(ctx), d).deleteRecursively() }
+            }
+            runCatching { java.io.File(candy.ide.engine.Engine.root(ctx), "stdlib.version").delete() }
+            main.post {
+                runCatching {
+                    val i = android.content.Intent(ctx, candy.ide.MainActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    ctx.startActivity(i)
+                }
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
+    }
+
+    /** 删除 IDE：删除整个 IDE 目录、撤销目录授权，然后发起系统卸载请求。 */
+    fun deleteIde(ctx: android.content.Context) {
+        io.execute {
+            runCatching { candy.ide.fs.CandyFs.wipeWorkspace(ctx) }
+            runCatching {
+                val uri = candy.ide.fs.CandyFs.treeUri(ctx)
+                if (uri != null) {
+                    ctx.contentResolver.releasePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }
+            }
+            main.post {
+                runCatching {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_DELETE)
+                        .setData(android.net.Uri.parse("package:" + ctx.packageName))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(intent)
+                }
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }
+    }
     /** 页面恢复：驱动编辑页检测文件外部修改（黄条）并重建文件树。 */
     fun onResumed() {
         resumeNonce.intValue++
@@ -786,16 +871,16 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 内置工程：首次从 assets 释放到 files/candy/builtin/<name>/ 并打只读标记，随后打开。 */
     fun openBuiltinProject(ctx: android.content.Context, assetDir: String, name: String) {
+
         val root = ProjectStore.builtinRoot(ctx)
-        val dir = java.io.File(root, name)
+        val dir = root.child(name)
         // 首次（或被清空后）从 assets 释放；已存在则直接打开
-        if (!dir.isDirectory || java.io.File(dir, ".candy_builtin").isFile.not() || dir.listFiles()?.isEmpty() == true) {
-            dir.mkdirs()
+        if (!dir.isDirectory() || dir.find(".candy_builtin")?.isFile() != true || dir.listFiles()?.isEmpty() != false) {
             runCatching {
                 val files = ctx.assets.list("builtin/" + assetDir) ?: emptyArray()
                 files.forEach { fn ->
                     ctx.assets.open("builtin/" + assetDir + "/" + fn).use { input ->
-                        java.io.File(dir, fn).outputStream().use { input.copyTo(it) }
+                        dir.child(fn).outputStream().use { input.copyTo(it) }
                     }
                 }
                 ProjectStore.writeType(dir, ProjectStore.TYPE_MD)
@@ -828,11 +913,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val open = openFiles.toList()
         var n = 0
         for (f in open) {
-            val text = savedTexts[f.absolutePath] ?: continue
-            if (dirtyTexts.containsKey(f.absolutePath)) {
+            val text = savedTexts[f.key] ?: continue
+            if (dirtyTexts.containsKey(f.key)) {
                 runCatching { f.writeText(text) }
                     .onFailure { mdLogUser("**[保存失败]** " + f.name + " " + (it.message ?: it.javaClass.simpleName)) }
-                dirtyTexts.remove(f.absolutePath)
+                dirtyTexts.remove(f.key)
                 n++
             }
         }
@@ -842,8 +927,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveCurrent(text: String) {
         val file = currentFile.value ?: return
-        savedTexts[file.absolutePath] = text
-        dirtyTexts.remove(file.absolutePath)
+        savedTexts[file.key] = text
+        dirtyTexts.remove(file.key)
         io.execute {
             runCatching { file.writeText(text) }
                 .onSuccess {
@@ -871,6 +956,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 if (text != null) file.writeText(text)
                 val project = currentProject.value
+                // md 文档工程没有可执行代码：短按运行直接拒绝并指 引到打包
+                if (project != null && ProjectStore.typeOf(project) == ProjectStore.TYPE_MD)
+                    throw RuntimeException("md 文档工程不可运行：长按「运行」打包成文档 APK")
                 val type = if (project != null) ProjectStore.typeOf(project) else ProjectStore.TYPE_JS
                 if (type == ProjectStore.TYPE_JS || type == ProjectStore.TYPE_JSAPK) {
                     mdLog("**[运行]** `" + file.name + "` 编译 → JS → WebView")
@@ -947,13 +1035,13 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     // ---- JS-apk 打包 ----
 
     /** 当前工程的入口 .subl（有 jsapk.json 读 entry，没有就取第一个 .subl） */
-    private fun jsapkEntry(project: File): File? {
+    private fun jsapkEntry(project: CandyPath): CandyPath? {
         // 走 JsApkConfig 的 org.json 解析：手工 substringAfter 截到行尾会把整段 JSON 粘进文件名
         val entry = runCatching { JsApkConfig.load(project).entry }.getOrNull()
-        val candidate = entry?.let { File(project, it) }
+        val candidate = entry?.let { project.find(it) }
         return when {
-            candidate?.isFile == true -> candidate
-            else -> project.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".subl") }
+            candidate?.isFile() == true -> candidate
+            else -> project.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
         }
     }
 
@@ -966,15 +1054,15 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 指定工程打包：有 jsapk.json（JS-apk 或 JS 平台工程在设置页配过）走它，否则 JS 平台工程用自动 ASCII 包名 */
-    fun buildApkProject(dir: File) {
+    fun buildApkProject(dir: CandyPath) {
         // md 文档工程走专用打包链路（不编译 subl，只打包文档与阅读器）
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_MD) { buildMdApkProject(dir); return }
-        if (File(dir, "jsapk.json").isFile) { buildApkIn(dir); return }
+        if (dir.find("jsapk.json")?.isFile() == true) { buildApkIn(dir); return }
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) { buildApkIn(dir); return }
         buildApkIn(dir, JsApkConfig(
             pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
             label = dir.name,
-            entry = dir.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".subl") }?.name ?: "main.subl",
+            entry = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }?.name ?: "main.subl",
         ))
     }
 
@@ -983,7 +1071,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** md 文档工程打包：收集 .md → 阅读器壳注进模板 APK → 签名 → build/app.apk */
-    fun buildMdApkProject(dir: File) {
+    fun buildMdApkProject(dir: CandyPath) {
         if (running.value) return
         running.value = true
         openDrawerTab(1)
@@ -1007,6 +1095,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (t: Throwable) {
                 mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
+                mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
                 main.post { runFailed.value = true }
             } finally {
                 main.post { running.value = false }
@@ -1015,7 +1104,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 工程设置页也能触发：指定工程打包，入口/包名走该工程的 jsapk.json */
-    fun buildApkIn(project: File, forced: JsApkConfig? = null) {
+    fun buildApkIn(project: CandyPath, forced: JsApkConfig? = null) {
         val pj = project
         if (running.value) return
         running.value = true
@@ -1032,10 +1121,10 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 val cfg = forced ?: JsApkConfig.load(pj)
                 // 自定义证书（工程 jsapk.json 指定的 .jks）
                 val certErr = if (cfg.certPath != null && cfg.certPass != null) {
-                    val jks = java.io.File(pj, cfg.certPath)
-                    if (!jks.isFile) "[打包] 证书文件不存在：" + cfg.certPath
+                    val jks = pj.find(cfg.certPath!!) ?: pj.walk().firstOrNull { it.name == cfg.certPath?.substringAfterLast('/') }
+                    if (jks == null || !jks.isFile()) "[打包] 证书文件不存在：" + cfg.certPath
                     else {
-                        val err = candy.ide.jsapk.ApkSigner.loadJks(jks, cfg.certPass.toCharArray())
+                        val err = candy.ide.jsapk.ApkSigner.loadJks(jks, cfg.certPass!!.toCharArray())
                         if (err != null) "[打包] " + err else null
                     }
                 } else {
@@ -1061,7 +1150,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (t: Throwable) {
-                mdLog("**[打包失败]** " + linkPositions(t.message?.replace("`", "'") ?: t.javaClass.simpleName, File(project, JsApkConfig.load(project).entry)))
+                mdLog("**[打包失败]** " + linkPositions(t.message?.replace("`", "'") ?: t.javaClass.simpleName, project.find(JsApkConfig.load(project).entry)))
                 main.post { runFailed.value = true }
             } finally {
                 main.post { running.value = false }
@@ -1077,7 +1166,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 安装完成反馈（成弹「打开」、败弹原因），installing 期间 UI 显示等待框 */
-    fun installPkg(apk: File, pkg: String? = null) {
+    fun installPkg(apk: CandyPath, pkg: String? = null) {
         if (installing.value) return
         installing.value = true
         openDrawerTab(1)
@@ -1115,13 +1204,16 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 文件树/任意 apk：包名未知时不传，成功后「打开」走包名兜底失败提示 */
-    fun installApk(file: File) = installPkg(file)
+    fun installApk(file: CandyPath) = installPkg(file)
 
     /** 用其它应用打开（FileProvider 授权读） */
-    fun openExternal(ctx: android.content.Context, file: File) {
+    fun openExternal(ctx: android.content.Context, file: CandyPath) {
         runCatching {
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                ctx, ctx.packageName + ".fileprovider", file)
+            val uri = when (file) {
+                is CandyPath.Local -> androidx.core.content.FileProvider.getUriForFile(
+                    ctx, ctx.packageName + ".fileprovider", file.file)
+                is CandyPath.Saf -> file.uri()
+            }
             val mime = when (file.extension.lowercase()) {
                 "apk" -> "application/vnd.android.package-archive"
                 "md" -> "text/markdown"
@@ -1137,42 +1229,42 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 复制路径到系统剪贴板 */
-    fun copyPath(ctx: android.content.Context, file: File) {
+    fun copyPath(ctx: android.content.Context, file: CandyPath) {
         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("path", file.absolutePath))
-        mdLogUser("**[已复制路径]** " + file.absolutePath)
+        cm.setPrimaryClip(ClipData.newPlainText("path", file.key))
+        mdLogUser("**[已复制路径]** " + file.key)
     }
 
     /** 打开方式：md 以纯文本进编辑器（其它类型直接打开） */
-    fun openAsText(file: File) {
-        if (file.name.endsWith(".md", ignoreCase = true)) mdTextMode[file.absolutePath] = true
+    fun openAsText(file: CandyPath) {
+        if (file.name.endsWith(".md", ignoreCase = true)) mdTextMode[file.key] = true
         openFile(file)
     }
 
     /** 打开方式：md 以 Markdown 渲染阅读 */
-    fun openAsMd(file: File) {
-        if (file.name.endsWith(".md", ignoreCase = true)) mdTextMode[file.absolutePath] = false
+    fun openAsMd(file: CandyPath) {
+        if (file.name.endsWith(".md", ignoreCase = true)) mdTextMode[file.key] = false
         openFile(file)
     }
 
-    fun copyNode(f: File) {
+    fun copyNode(f: CandyPath) {
         clipFile.value = f
         clipCut = false
         mdLogUser("**[已复制]** " + f.name)
     }
 
-    fun cutNode(f: File) {
+    fun cutNode(f: CandyPath) {
         clipFile.value = f
         clipCut = true
         mdLogUser("**[已剪切]** " + f.name)
     }
 
-    fun pasteInto(dir: File) {
+    fun pasteInto(dir: CandyPath) {
         val src = clipFile.value ?: return
         io.execute {
-            val target = File(dir, src.name)
+            val target = dir.find(src.name) ?: dir.child(src.name)
             val ok = if (clipCut) {
-                if (src.parentFile == dir) true else src.renameTo(target) ||
+                if (src.parent == dir) true else src.renameTo(target) ||
                     runCatching { src.copyTo(target, overwrite = false); src.deleteRecursively() }.getOrDefault(false)
             } else {
                 runCatching { src.copyTo(target, overwrite = false); true }.getOrDefault(false)
@@ -1193,58 +1285,59 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- 文件树操作 ----
 
-    fun createFile(parent: File, name: String) {
+    fun createFile(parent: CandyPath, name: String) {
         io.execute {
             val f = ProjectStore.createFile(parent, name)
             if (f != null) main.post { treeVersion.intValue++ } else mdLog("**[新建失败]** 名字非法或文件已存在")
         }
     }
 
-    fun createDir(parent: File, name: String) {
+    fun createDir(parent: CandyPath, name: String) {
         io.execute {
             val f = ProjectStore.createDir(parent, name)
             if (f != null) main.post { treeVersion.intValue++ } else mdLog("**[新建失败]** 名字非法或目录已存在")
         }
     }
 
-    fun renameNode(f: File, newName: String) {
+    fun renameNode(f: CandyPath, newName: String) {
         io.execute {
             val ok = ProjectStore.renameFile(f, newName)
             if (ok) {
-                val target = File(f.parentFile, newName)
-                savedTexts.remove(f.absolutePath)?.let { savedTexts[target.absolutePath] = it }
-                if (dirtyTexts.remove(f.absolutePath) != null) dirtyTexts[target.absolutePath] = true
-                val idx = openFiles.indexOf(f)
-                if (idx >= 0) openFiles[idx] = File(f.parentFile, newName)
-                if (currentFile.value == f) currentFile.value = File(f.parentFile, newName)
+                val target = f.parent?.find(newName)
+                if (target != null) {
+                    savedTexts.remove(f.key)?.let { savedTexts[target.key] = it }
+                    if (dirtyTexts.remove(f.key) != null) dirtyTexts[target.key] = true
+                    val idx = openFiles.indexOf(f)
+                    if (idx >= 0) openFiles[idx] = f.parent?.child(newName)!!
+                    if (currentFile.value == f) currentFile.value = f.parent?.child(newName)
+                }
                 main.post {
                     treeVersion.intValue++
-                    if (idx >= 0) selectTab(idx)
                 }
             } else mdLog("**[重命名失败]** 名字非法或已存在")
         }
     }
 
     /** 多选批量操作：把一组文件复制/剪切到剪贴板集合（粘贴时还原目录结构） */
-    private val _multiClip = mutableStateOf<List<File>>(emptyList())
+    private val _multiClip = mutableStateOf<List<CandyPath>>(emptyList())
     val multiClip get() = _multiClip
     private var multiClipCut = false
 
-    fun copyMulti(files: List<File>) { _multiClip.value = files; multiClipCut = false }
-    fun cutMulti(files: List<File>) { _multiClip.value = files; multiClipCut = true }
+    fun copyMulti(files: List<CandyPath>) { _multiClip.value = files; multiClipCut = false }
+    fun cutMulti(files: List<CandyPath>) { _multiClip.value = files; multiClipCut = true }
 
     /** 粘贴多选集合到目标目录 */
-    fun pasteMultiInto(dir: File) {
+    fun pasteMultiInto(dir: CandyPath) {
         val src = _multiClip.value
         if (src.isEmpty()) return
         io.execute {
             var n = 0
             for (f in src) {
-                val target = File(dir, f.name)
-                if (target.absolutePath == f.absolutePath) continue
+                val target = dir.find(f.name) ?: dir.child(f.name)
+                if (target.key == f.key) continue
                 runCatching {
                     if (multiClipCut) { if (f.renameTo(target)) n++ }
-                    else { f.copyRecursively(target, overwrite = true); n++ }
+                    else { f.copyTo(target, overwrite = true); n++ }
                 }
             }
             if (multiClipCut) _multiClip.value = emptyList()
@@ -1256,12 +1349,12 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 多选批量删除 */
-    fun deleteMulti(files: List<File>) {
+    fun deleteMulti(files: List<CandyPath>) {
         io.execute {
             var n = 0
             for (f in files) {
-                savedTexts.remove(f.absolutePath)
-                dirtyTexts.remove(f.absolutePath)
+                savedTexts.remove(f.key)
+                dirtyTexts.remove(f.key)
                 if (ProjectStore.deleteFile(f)) n++
             }
             main.post { treeVersion.intValue++; toast.value = "已删除 " + n + " 项" }
@@ -1269,16 +1362,16 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 多选压缩为 zip */
-    fun zipMulti(files: List<File>, target: File) {
+    fun zipMulti(files: List<CandyPath>, target: CandyPath) {
         toast.value = "正在压缩…"
         io.execute {
             val ok = runCatching {
                 java.util.zip.ZipOutputStream(target.outputStream()).use { zos ->
                     for (f in files) {
-                        val base = f.parentFile ?: break
-                        if (f.isDirectory) {
-                            f.walkTopDown().filter { it.isFile }.forEach { sub ->
-                                val rel = sub.absolutePath.removePrefix(base.absolutePath).trimStart('/')
+                        val base = f.parent ?: break
+                        if (f.isDirectory()) {
+                            f.walk().filter { it.isFile() }.forEach { sub ->
+                                val rel = sub.key.removePrefix(base.key).trimStart('/')
                                 zos.putNextEntry(java.util.zip.ZipEntry(rel))
                                 sub.inputStream().use { it.copyTo(zos) }
                                 zos.closeEntry()
@@ -1298,11 +1391,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun deleteNode(f: File) {
+    fun deleteNode(f: CandyPath) {
         io.execute {
-            savedTexts.remove(f.absolutePath)
-            dirtyTexts.remove(f.absolutePath)
-            mdTextMode.remove(f.absolutePath)
+            savedTexts.remove(f.key)
+            dirtyTexts.remove(f.key)
+            mdTextMode.remove(f.key)
             val ok = ProjectStore.deleteFile(f)
             if (ok) {
                 val idx = openFiles.indexOf(f)
@@ -1313,7 +1406,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 工程根目录（文件树「新建」的默认父目录） */
-    fun treeRoot(): File? = currentProject.value
+    fun treeRoot(): CandyPath? = currentProject.value
 
     /** 编译/打包用时：毫秒 → 秒 → mm:ss → hh:mm:ss 自适应 */
     private fun fmtElapsed(ms: Long): String {
@@ -1377,7 +1470,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun formatDocument(): Boolean {
         val f = currentFile.value ?: return false
         val name = f.name
-        val text = savedTexts[f.absolutePath] ?: f.readText()
+        val text = savedTexts[f.key] ?: f.readText()
         val analysis = runCatching { analysis() }.getOrNull() ?: return false
         analysis.updateDocument(name, text)
         val edits = analysis.formatDocument(name) ?: return false
@@ -1427,7 +1520,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 设置页 IDE 日志：初始载入落盘文件尾部的记录 */
     fun ensureIdeLogLoaded() {
-        if (ideLog.isNotEmpty() || !logFile.isFile) return
+        if (ideLog.isNotEmpty() || !logFile.isFile()) return
         runCatching { ideLog.addAll(logFile.readText().takeLast(1 shl 16).lines().filter { it.isNotBlank() }) }
     }
 
@@ -1445,11 +1538,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     /** 保证 demo 工程存在且是最新示例；旧脚本版种子自动迁移为编译模式版。 */
     private fun seedDemo() {
         val projects = ProjectStore.projectsRoot(getApplication())
-        val demo = File(projects, "demo").apply { mkdirs() }
-        val current = File(demo, "hello.subl")
+        val demo = projects.find("demo") ?: projects.createDirectory("demo") ?: return
+        val current = demo.find("hello.subl") ?: demo.child("hello.subl")
         if (current.exists()) return
-        val legacy = File(demo, "hello.subs")
-        if (legacy.exists()) {
+        val legacy = demo.find("hello.subs")
+        if (legacy != null) {
             // 内容是旧脚本版才替换；被用户改动过的原样保留
             if (legacy.readText() == OLD_SCRIPT_DEMO) legacy.delete()
             else legacy.renameTo(current)

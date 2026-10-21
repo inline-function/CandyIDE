@@ -90,7 +90,7 @@ fun TerminalScreen(vm: CandyViewModel) {
     LaunchedEffect(Unit) { runCatching { focusReq.requestFocus() } }
     var busy by remember { mutableStateOf(false) }
     // 当前工作目录：cd 切换、提示符显示、命令执行前缀
-    var cwd by remember { mutableStateOf(vm.currentProject.value?.absolutePath ?: "/sdcard") }
+    var cwd by remember { mutableStateOf(vm.currentProject.value?.displayPath ?: "/sdcard") }
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {

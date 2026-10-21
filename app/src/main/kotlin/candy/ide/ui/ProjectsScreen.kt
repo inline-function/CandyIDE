@@ -133,8 +133,8 @@ fun ProjectsScreen(vm: CandyViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProjectCard(dir: File, onClick: () -> Unit, onSettings: () -> Unit, onDelete: () -> Unit) {
-    val fileCount = remember(dir) { dir.walkTopDown().count { it.isFile } }
+private fun ProjectCard(dir: candy.ide.fs.CandyPath, onClick: () -> Unit, onSettings: () -> Unit, onDelete: () -> Unit) {
+    val fileCount = remember(dir) { dir.walk().count { it.isFile() } }
     val type = remember(dir) { ProjectStore.typeOf(dir) }
     val edited = remember(dir) { ProjectStore.lastEdited(dir) }
     val editedText = remember(edited) { relativeTime(edited) }
