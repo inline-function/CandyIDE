@@ -125,6 +125,39 @@ class MainActivity : Activity() {
             report("**[运行时]** assets/app.js 为空：请在 CandyIDE 里先打包一次")
             return
         }
+        // 渲染模式（md 文档阅读器等直接画 DOM 的应用）：全屏 WebView，不走控制台。
+        // 直接把 JS 作为内联 script 装进 HTML 一次加载：evaluateJavascript 对
+        // about:blank 的注入时机不可靠（部分 WebView 不触发 onPageFinished → 白屏）
+        if (js.contains("CANDY_VIEWER")) {
+            web.visibility = View.VISIBLE
+            web.setBackgroundColor(Color.WHITE)
+            // 用全屏 FrameLayout 承载：直接 setContentView(web) 时根 LinearLayout 会
+            // 按内容测量 WebView，about:blank 页面内容为空 → 高度被压成 0 → 白屏
+            // 部分 WebView 实现首帧不合成（DOM 正常但像素空白）：软件层强制绘制
+            web.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            val frame = android.widget.FrameLayout(this).apply {
+                setBackgroundColor(Color.WHITE)
+                addView(web, android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT))
+            }
+            setContentView(frame)
+            val html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                "<style>body{margin:0}</style></head><body><script>" +
+                js + "\nmain();</script></body></html>"
+            // console 转发到 logcat：用户 JS 报错可见；华为 WebView 需要
+            // 显式设置 WebChromeClient 才会完整初始化渲染管线（实测去掉后白屏）
+            web.webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(cm: android.webkit.ConsoleMessage?): Boolean {
+                    cm ?: return false
+                    android.util.Log.i("CandyJsapk", "[console] " + cm.message())
+                    return true
+                }
+            }
+            web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+            return
+        }
         web.evaluateJavascript(prelude() + "\n" + patchDone(js), null)
     }
 

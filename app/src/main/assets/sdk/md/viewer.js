@@ -1,5 +1,7 @@
 // CandyIDE md 文档阅读器：纯 JS，无外部依赖；入口 main() 由模板容器调用
 'use strict';
+// 渲染模式标记：容器检测到后全屏显示 WebView（而不是黑底控制台）
+window.CANDY_VIEWER = true;
 var DOCS = __DOCS_JSON__;
 var INDEX = __INDEX_JSON__;
 

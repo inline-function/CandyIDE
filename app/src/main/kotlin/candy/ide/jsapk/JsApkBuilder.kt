@@ -70,7 +70,7 @@ data class JsApkConfig(
 object JsApkBuilder {
 
     internal const val ASSET_TEMPLATE = "sdk/jsapk/template.apk"
-    internal const val TEMPLATE_VERSION = 3
+    internal const val TEMPLATE_VERSION = 14
 
     /** 编译入口文件并打包：返回产物路径 */
     fun build(ctx: Context, entryFile: candy.ide.fs.CandyPath, cfg: JsApkConfig, onCompiled: ((Long) -> Unit)? = null): candy.ide.fs.CandyPath {
