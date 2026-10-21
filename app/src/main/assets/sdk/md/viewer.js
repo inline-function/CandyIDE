@@ -74,10 +74,16 @@ function main(){
   return { then: function(ok, bad){ try { ok && ok(); } catch(e){ bad && bad(e); } } };
 }
 
+// 单页阅读：进入正文时收起文档列表，返回时清空正文——两块互斥，不叠显
 function show(name){
+  document.getElementById('list').style.display = 'none';
   document.getElementById('body').innerHTML = md(DOCS[name] || ('（无此文档：' + name + ')'));
   document.getElementById('back').style.display = 'block';
   window.scrollTo(0, 0);
 }
 
-function home(){ document.getElementById('back').style.display = 'none'; }
+function home(){
+  document.getElementById('body').innerHTML = '';
+  document.getElementById('back').style.display = 'none';
+  document.getElementById('list').style.display = 'block';
+}
