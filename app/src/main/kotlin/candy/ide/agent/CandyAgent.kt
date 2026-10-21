@@ -46,7 +46,7 @@ class CandyAgent(private val ctx: Context) {
         apiKey = Settings.agentKey,
         modelName = Settings.agentModel,
         toolsJson = tools.openAiTools(),
-        temperature = Settings.agentTemperature,
+        temperature = Settings.agentTemperature.coerceIn(0f, 1.0f),
         streamMode = Settings.agentStream,
     )
 
@@ -110,7 +110,7 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
     fun ask(userText: String): Flow<Event> = flow {
         dbg("ask start: " + userText.take(40))
         // 每次发起前刷新一次工具看到的上下文与模型参数（设置页可能刚改过）
-        model.temperature = Settings.agentTemperature
+        model.temperature = Settings.agentTemperature.coerceIn(0f, 1.0f)
         model.streamMode = Settings.agentStream
         // 首轮：以 user message 形式把语言文档喂给模型（只插一次，之后随历史携带）
         if (firstAskOfSession) {
@@ -142,7 +142,9 @@ Sublimation 是自研函数式语言，编译目标为 JS（WebView 运行），
             var failure: Throwable? = null
             dbg("round " + round + " history=" + pending.size + " stream=" + model.streamMode + " url=" + Settings.agentBaseUrl)
             runCatching {
-                model.generateContent(req, false).collect { resp = it }
+                kotlinx.coroutines.withTimeout(180_000L) {
+                    model.generateContent(req, false).collect { resp = it }
+                }
             }.onFailure { failure = it }
             if (failure != null) dbg("model failure: " + failure!!.javaClass.simpleName + ": " + failure?.message)
             if (resp == null) {

@@ -46,6 +46,7 @@ class OpenAiCompatModel(
     override val name: String = modelName
 
     override fun generateContent(request: LlmRequest, stream: Boolean): Flow<LlmResponse> = flow {
+        android.util.Log.w("CandyAgent", "flow start streamMode=" + streamMode)
         val payload = buildPayload(request)
         // 端点规整：常见兼容网关的路径是 /v1/chat/completions，用户只填了域名时自动补 /v1
         val base = baseUrl.trim().trimEnd('/')
@@ -99,7 +100,7 @@ class OpenAiCompatModel(
     private fun buildPayload(request: LlmRequest): JSONObject {
         val json = JSONObject()
         json.put("model", modelName)
-        json.put("stream", false)
+        json.put("stream", streamMode)
         json.put("max_tokens", 4096)
         val msgs = JSONArray()
         val contents = request.contents

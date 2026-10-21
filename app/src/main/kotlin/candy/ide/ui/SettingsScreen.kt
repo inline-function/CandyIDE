@@ -397,12 +397,12 @@ fun SettingsScreen(vm: CandyViewModel) {
                         }
                         androidx.compose.material3.Slider(
                             value = agentTemp,
-                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 2f) },
+                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 1.0f) },
                             onValueChangeFinished = {
                                 Settings.agentTemperature = agentTemp
                                 Settings.persist(ctx)
                             },
-                            valueRange = 0f..2f,
+                            valueRange = 0f..1.0f,
                             steps = 19,
                         )
                     }
