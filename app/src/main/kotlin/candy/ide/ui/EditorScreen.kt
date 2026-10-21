@@ -320,7 +320,9 @@ fun EditorScreen(vm: CandyViewModel) {
                                 modifier = Modifier
                                     .size(44.dp)
                                     .combinedClickable(
-                                        enabled = isEditableFile && editor != null && !running,
+                                        // 运行/打包只需要工程与文件存在：md 渲染模式下没有编辑器实例，
+                                        // 但长按打包必须可用（md 文档工程的主要操作）
+                                        enabled = safe != null && !running,
                                         onClick = { vm.saveAndRun(editor?.text?.toString()) },
                                         onLongClick = { vm.buildApk() },
                                     ),
