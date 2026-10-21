@@ -178,21 +178,21 @@ private fun MiniChatWindow(
             .background(FloatBg)
             .padding(10.dp),
     ) {
-        // 标题行：模型名 / 全屏 / 关闭（按住「助手」标识拖动整窗；右侧按钮不被拖动拦截）
+        // 标题行：模型名 / 状态 / 全屏 / 关闭 —— 除按钮外整行可拖动整窗
         Row(
             verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount.x, dragAmount.y)
+                    },
+                )
+            },
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { }, 
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            onDrag(dragAmount.x, dragAmount.y)
-                        },
-                    )
-                },
             ) {
                 Icon(Icons.Default.SmartToy, contentDescription = null, tint = BubbleColor, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.size(5.dp))
@@ -239,15 +239,7 @@ private fun MiniChatWindow(
                 }
             }
             items(vm.chat) { msg -> MiniBubble(msg) }
-            if (sending) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = BubbleColor, strokeWidth = 2.dp)
-                        Spacer(Modifier.size(6.dp))
-                        Text("正在思考…", color = FloatDim, fontSize = 11.sp)
-                    }
-                }
-            }
+            // 正在思考…的占位由对话流里的思考气泡承载（MiniBubble 三态渲染）
         }
         Spacer(Modifier.size(6.dp))
         // 输入行
@@ -361,16 +353,38 @@ private fun MiniBubble(msg: ChatMessage) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
-        Text(
-            msg.text,
-            color = if (isUser) Color.White else Color(0xFFD5D2E0),
-            fontSize = 12.sp,
+        Column(
             modifier = Modifier
                 .fillMaxWidth(0.85f)
                 .clip(RoundedCornerShape(10.dp))
                 .background(if (isUser) BubbleColor.copy(alpha = 0.35f) else Color(0xFF2A2C36))
                 .padding(8.dp),
-        )
+        ) {
+            if (msg.thinking) {
+                // 思考中：加载图标 + 阶段文案（位于对话流，不再占顶栏）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(10.dp), color = BubbleColor, strokeWidth = 1.5.dp)
+                    Spacer(Modifier.size(5.dp))
+                    Text(msg.summary().ifBlank { "思考中…" }, color = FloatDim, fontSize = 11.sp)
+                }
+            } else if (msg.toolName != null) {
+                // 工具气泡：折叠摘要 + 展开详情
+                var expanded by remember { mutableStateOf(!msg.collapsed) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (expanded) "▼" else "▶", color = FloatDim, fontSize = 9.sp,
+                        modifier = Modifier.ballClick { expanded = !expanded; msg.collapsed = !expanded })
+                    Spacer(Modifier.size(4.dp))
+                    Text(msg.summary(), color = if (msg.done) FloatDim else BubbleColor, fontSize = 11.sp,
+                        modifier = Modifier.ballClick { expanded = !expanded; msg.collapsed = !expanded })
+                }
+                if (expanded) {
+                    Spacer(Modifier.size(3.dp))
+                    Text(msg.text, color = FloatDim, fontSize = 10.sp)
+                }
+            } else {
+                Text(msg.text, color = if (isUser) Color.White else Color(0xFFD5D2E0), fontSize = 12.sp)
+            }
+        }
     }
 }
 /** 在悬浮窗里替代 Modifier.clickable：手动检测 Press+Release（clickable 的事件链在悬浮窗里会被打断） */

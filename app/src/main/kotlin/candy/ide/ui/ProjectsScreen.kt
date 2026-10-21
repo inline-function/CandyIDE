@@ -65,7 +65,7 @@ fun ProjectsScreen(vm: CandyViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("CandyIDE", fontWeight = FontWeight.Bold) },
+                title = { CandyTitleWithEgg() },
                 actions = {
                     IconButton(onClick = { vm.goSettings() }) {
                         Icon(Icons.Default.Settings, contentDescription = "设置", tint = CandyText)

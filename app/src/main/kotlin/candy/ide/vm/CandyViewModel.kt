@@ -384,6 +384,13 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 磁盘已更新而编辑器无未保存改动：静默跟随磁盘内容（agent 改完文件的常见情形，不弹黄条）。 */
+    fun followDiskChange() {
+        val f = currentFile.value ?: return
+        dirtyTexts.remove(f.key)
+        forceReloadNonce.intValue++
+    }
+
     /** 外部修改同步：丢弃内存正文，强制从磁盘重载（编辑器侧随即重读）。 */
     fun reloadCurrentFromDisk() {
         val f = currentFile.value ?: return
@@ -498,7 +505,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var agent: candy.ide.agent.CandyAgent? = null
     private var agentJob: kotlinx.coroutines.Job? = null
 
-    /** 问 agent 一句；事件流逐条落进 chat */
+    /** 问 agent 一句；事件流逐条落进 chat（chunk=流式增量，tool_start/tool=工具气泡） */
     fun askAgent(ctx: android.content.Context, text: String) {
         if (agentBusy.value) return
         if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext)
@@ -506,27 +513,82 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             tools.currentFile = currentFile.value
             tools.currentProjectDir = currentProject.value
             tools.diagnostics = diagnostics.toList()
+            // UI 按键工具：等价于编辑页按钮（agent 可直接打包/运行/保存/跳行）
+            tools.onTapRun = { main.post { saveAndRun(savedText()) } }
+            tools.onLongPressRun = { main.post { buildApk() } }
+            tools.onTapSave = { main.post { saveCurrentFile() } }
+            tools.onTapEdit = { content -> main.post { applyAgentEdit(content) } }
+            tools.onGotoLine = { line -> main.post { requestGoto(line) } }
         }
         chat.add(ChatMessage(ChatMessage.Role.USER, text))
         agentBusy.value = true
         agentStage.value = "思考中…"
+        // 对话流里先插一条思考气泡（加载图标 + 文案），随事件流推进更新
+        val thinking = ChatMessage(ChatMessage.Role.MODEL, "")
+        thinking.thinking = true
+        chat.add(thinking)
         agentJob = viewModelScope.launch {
             try {
                 agent!!.ask(text).collect { ev ->
                     val author = ev.author
-                    if (author == "user") return@collect   // 用户气泡已在上方直接添加，跳过回声
-                    val body = ev.content?.parts?.mapNotNull { it.text }?.joinToString("")?.trim() ?: ""
-                    if (body.isBlank()) return@collect
-                    if (author == "tool") {
-                        val name = body!!.substringAfter("[工具 ").substringBefore(" ")
-                        agentStage.value = "调用工具 " + name + "…"
+                    val body = ev.content?.parts?.mapNotNull { it.text }?.joinToString("") ?: ""
+                    when (author) {
+                        "user" -> {}  // 用户气泡已在上方直接添加，跳过回声
+                        "chunk" -> {
+                            // 流式增量：追加到最后一条助手气泡（若末尾是思考气泡则转成正文）
+                            val last = chat.lastOrNull()
+                            if (last != null && last.role == ChatMessage.Role.MODEL) {
+                                if (last.thinking) { last.thinking = false; last.text = "" }
+                                if (last.toolName != null) return@collect
+                                last.append(body)
+                            }
+                        }
+                        "tool_start" -> {
+                            // 工具开始：进行中的折叠气泡（"正在读取文件…"）
+                            agentStage.value = "调用工具 " + body + "…"
+                            val last = chat.lastOrNull()
+                            if (last != null && last.thinking) {
+                                // 思考气泡让位给工具气泡
+                                chat.removeAt(chat.lastIndex)
+                            }
+                            val tb = ChatMessage(ChatMessage.Role.TOOL, "", body)
+                            tb.thinking = true
+                            chat.add(tb)
+                        }
+                        "tool" -> {
+                            // 工具完成：§tool§<名字>§<参数>§<结果> 四段解析
+                            val segs = body.split("§")
+                            if (segs.size >= 4 && segs[1] == "tool") {
+                                val name = segs[2]
+                                val args = segs[3]
+                                val result = segs.subList(4, segs.size).joinToString("§")
+                                // 更新进行中的工具气泡，没有则新建
+                                val last = chat.lastOrNull()
+                                if (last != null && last.role == ChatMessage.Role.TOOL && last.toolName == name && !last.done) {
+                                    last.thinking = false
+                                    last.done = true
+                                    last.text = "[工具 " + name + "] 参数: " + args + "\n结果: " + result
+                                } else {
+                                    chat.add(ChatMessage(ChatMessage.Role.TOOL, "[工具 " + name + "] 参数: " + args + "\n结果: " + result, name).apply { done = true })
+                                }
+                                // 下一轮模型请求前重新插思考气泡
+                                val nm = ChatMessage(ChatMessage.Role.MODEL, "")
+                                nm.thinking = true
+                                chat.add(nm)
+                            }
+                        }
+                        "model" -> {
+                            if (body.isBlank()) return@collect
+                            // 最终回答：落到最后的助手气泡（取代流式累积或思考占位）
+                            val last = chat.lastOrNull()
+                            if (last != null && last.role == ChatMessage.Role.MODEL && last.toolName == null) {
+                                last.thinking = false
+                                last.text = body
+                            } else {
+                                chat.add(ChatMessage(ChatMessage.Role.MODEL, body))
+                            }
+                        }
                     }
-                    val role = when (author) {
-                        "model" -> ChatMessage.Role.MODEL
-                        "tool" -> ChatMessage.Role.TOOL
-                        else -> ChatMessage.Role.USER
-                    }
-                    chat.add(ChatMessage(role, body!!))
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -535,12 +597,13 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 agentBusy.value = false
                 agentStage.value = ""
-                // 一轮结束：agent 可能改过文件，通知编辑页重检测外部修改与文件树
+                // 收尾：残留的思考气泡（模型未输出任何正文）清掉
+                val last = chat.lastOrNull()
+                if (last != null && last.thinking) chat.removeAt(chat.lastIndex)
                 onAgentTurnDone()
             }
         }
     }
-
     /** 随时停止当前生成 */
     fun stopAgent() {
         agentJob?.cancel()
@@ -940,6 +1003,31 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 当前文件的内存正文（供 agent 的按键工具使用） */
+    private fun savedText(): String =
+        currentFile.value?.let { savedTexts[it.key] } ?: currentFile.value?.let { runCatching { it.readText() }.getOrDefault("") } ?: ""
+
+    /** 点保存按钮：把当前编辑器正文落盘（agent 的 tap_save） */
+    fun saveCurrentFile() {
+        val f = currentFile.value ?: return
+        val text = savedTexts[f.key] ?: return
+        io.execute { runCatching { f.writeText(text) } }
+    }
+
+    /** agent 替换当前文件全部内容：写盘并在回到编辑页时重读磁盘（editor 随 resumeNonce 检测后跟随） */
+    fun applyAgentEdit(content: String) {
+        val f = currentFile.value ?: return
+        io.execute {
+            runCatching { f.writeText(content) }
+            main.post {
+                // 编辑器若没有未保存改动：静默跟随磁盘；有改动则让黄条提示冲突
+                if (dirtyTexts[f.key] != true) followDiskChange()
+                resumeNonce.intValue++
+                treeVersion.intValue++
+            }
+        }
+    }
+
     fun saveAndRun(text: String?) {
         val file = currentFile.value ?: return
         if (running.value) {
@@ -1057,6 +1145,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun buildApkProject(dir: CandyPath) {
         // md 文档工程走专用打包链路（不编译 subl，只打包文档与阅读器）
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_MD) { buildMdApkProject(dir); return }
+        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_SCRIPT) { buildScriptApkProject(dir); return }
         if (dir.find("jsapk.json")?.isFile() == true) { buildApkIn(dir); return }
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) { buildApkIn(dir); return }
         buildApkIn(dir, JsApkConfig(
@@ -1097,6 +1186,54 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
                 mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
                 main.post { runFailed.value = true }
+            } finally {
+                main.post { running.value = false }
+            }
+        }
+    }
+
+/** 脚本工程打包：顶层语句包一层 @impure fun main，落进 build/__entry__.subl 再走标准链路 */
+    fun buildScriptApkProject(dir: CandyPath) {
+        if (running.value) return
+        running.value = true
+        openDrawerTab(1)
+        mdLog("**[打包]** 脚本工程 收集源码 → 包一层 main → 编译注入")
+        io.execute {
+            try {
+                val src = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subs") }
+                    ?: dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
+                if (src == null) {
+                    mdLog("**[打包失败]** 脚本工程里没有 .subs 源文件")
+                    main.post { running.value = false }
+                    return@execute
+                }
+                val body = src.readText().lines()
+                    .map { if (it.isBlank()) "" else "  " + it }
+                    .joinToString("\n")
+                val wrapperText = "@impure\nfun main() {\n" + body + "\n}\n"
+                val buildDir = dir.child("build")
+                if (!buildDir.isDirectory()) buildDir.createDirectory("build")
+                val wrapper = buildDir.child("__entry__.subl")
+                wrapper.writeText(wrapperText)
+                val cfg = JsApkConfig(
+                    pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
+                    label = dir.name,
+                )
+                val apk = JsApkBuilder.build(getApplication(), wrapper, cfg, onCompiled = { ms ->
+                    mdLog("**[编译完成]** 用时 " + fmtElapsed(ms))
+                })
+                wrapper.delete()
+                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 在工程 build/ 目录")
+                mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
+                main.post { runFailed.value = false }
+                if (Settings.silentInstall) installPkg(apk, cfg.pkg)
+                else main.post {
+                    pendingPkg.value = cfg.pkg
+                    pendingApk.value = apk
+                }
+            } catch (t: Throwable) {
+                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
+                mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
             } finally {
                 main.post { running.value = false }
             }
@@ -1531,8 +1668,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 跳转请求：>=0 表示有待跳转的行，EditorScreen 消费后置 -1 */
     var pendingGotoLine by mutableIntStateOf(-1)
-        private set
-    fun requestGoto(line: Int) { pendingGotoLine = line.coerceAtLeast(0) }
+        internal set
+    internal fun requestGoto(line: Int) { pendingGotoLine = line.coerceAtLeast(0) }
     fun consumeGoto() { pendingGotoLine = -1 }
 
     /** 保证 demo 工程存在且是最新示例；旧脚本版种子自动迁移为编译模式版。 */
@@ -1540,12 +1677,14 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val projects = ProjectStore.projectsRoot(getApplication())
         val demo = projects.find("demo") ?: projects.createDirectory("demo") ?: return
         val current = demo.find("hello.subl") ?: demo.child("hello.subl")
-        if (current.exists()) return
+        // 内容是旧编译版/旧脚本版才替换；被用户改动过的原样保留
+        if (current.exists() && current.readText() == OLD_COMPILE_DEMO) current.delete()
         val legacy = demo.find("hello.subs")
         if (legacy != null) {
-            // 内容是旧脚本版才替换；被用户改动过的原样保留
-            if (legacy.readText() == OLD_SCRIPT_DEMO) legacy.delete()
-            else legacy.renameTo(current)
+            if (legacy.readText() == OLD_SCRIPT_DEMO || legacy.readText() == OLD_SCRIPT_DEMO2) {
+                legacy.delete()
+                current.delete()
+            } else legacy.renameTo(current)
         }
         if (!current.exists()) current.writeText(DEMO_SOURCE)
         refreshProjects()
@@ -1554,7 +1693,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val MAX_LSP_SOURCE = 40_000
 
-        private const val DEMO_SOURCE = """// Sublimation 编译示例 —— 点右上角「运行」编译成 JS 并执行
+        // 旧编译版示例（检测到就替换为简化版）
+        private const val OLD_COMPILE_DEMO = """// Sublimation 编译示例 —— 点右上角「运行」编译成 JS 并执行
 fun main() {
   unchecked print("Hello, Sublimation!")
   var add = { x -> x + 1 }
@@ -1564,6 +1704,11 @@ fun main() {
   unchecked print(a + b)
 }
 """
+
+        private const val DEMO_SOURCE = """@impure
+fun main() =
+    print("hello,world!")
+"""
         // 脚本模式时期的旧种子内容（检测到就迁移为新的编译模式示例）
         private const val OLD_SCRIPT_DEMO = """// Sublimation 脚本示例 —— 点右上角「运行」试试
 var xs = listOf(1, 2, 3)
@@ -1572,16 +1717,47 @@ print(xs.map({ x => x + 1 }).size())
 print(xs.isEmpty())
 """
 
-        private const val SCRIPT_DEMO_SOURCE = """// Sublimation 脚本示例 —— 顶层语句直接执行，无需 main
+        private const val OLD_SCRIPT_DEMO2 = """// Sublimation 脚本示例 —— 顶层语句直接执行，无需 main
 print("Hello, Sublimation!")
 print(40 + 2)
 var name = "CandyIDE"
 print("从 " + name + " 运行")
+"""
+
+        private const val SCRIPT_DEMO_SOURCE = """print("hello,world!")
 """ 
     }
 }
 
-/** agent 聊天消息 */
-data class ChatMessage(val role: Role, val text: String) {
+/** agent 聊天消息
+ *  - [toolName] 非空表示工具气泡：折叠时显示已读取文件式摘要，展开显示参数与结果
+ *  - [thinking] 思考中：带加载图标与阶段文案（读取文件/编辑文件…），位于对话流中而非顶栏
+ *  - [collapsed] 工具气泡默认折叠 */
+class ChatMessage(val role: Role, initial: String, val toolName: String? = null) {
     enum class Role { USER, MODEL, TOOL }
+    // 字段可观察：流式块逐字追加 / 思考态切换 / 折叠态切换都会触发气泡重组
+    var text by androidx.compose.runtime.mutableStateOf(initial)
+    var thinking by androidx.compose.runtime.mutableStateOf(false)
+    var collapsed by androidx.compose.runtime.mutableStateOf(true)
+    var done by androidx.compose.runtime.mutableStateOf(false)
+    /** 流式块追加（同一气泡逐字增长） */
+    fun append(piece: String) { text += piece }
+    /** 工具气泡摘要：读取/编辑/执行… -> 已读取文件/已编辑文件… */
+    fun summary(): String {
+        val n = toolName ?: return text
+        return when (n) {
+            "read_current_file", "read_project_file" -> if (done) "已读取文件" else "正在读取文件"
+            "write_current_file" -> if (done) "已编辑文件" else "正在编辑文件"
+            "run_shell" -> if (done) "已执行命令" else "正在执行命令"
+            "list_project_files" -> if (done) "已列出文件清单" else "正在列出文件清单"
+            "get_project_tree" -> if (done) "已读取目录树" else "正在读取目录树"
+            "list_diagnostics" -> if (done) "已获取编译诊断" else "正在获取编译诊断"
+            "tap_run" -> if (done) "已运行工程" else "正在运行工程"
+            "long_press_run" -> if (done) "已打包应用" else "正在打包应用"
+            "tap_save" -> if (done) "已保存文件" else "正在保存文件"
+            "edit_current_file" -> if (done) "已编辑文件" else "正在编辑文件"
+            "goto_line" -> if (done) "已跳转行号" else "正在跳转行号"
+            else -> if (done) "已完成 " + n else "正在执行 " + n
+        }
+    }
 }

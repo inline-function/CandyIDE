@@ -66,8 +66,8 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: candy.ide.fs.CandyPath) {
     BackHandler { vm.goBack() }
     val type = remember(dir) { ProjectStore.typeOf(dir) }
     val isJsApk = type == ProjectStore.TYPE_JSAPK
-    // JS 平台工程（控制台模式）也支持整套 APK 配置：包名/应用名/图标/入口
-    val showApk = type == ProjectStore.TYPE_JSAPK || type == ProjectStore.TYPE_JS
+    // JS 平台工程（控制台模式）与脚本工程也支持整套 APK 配置：包名/应用名/图标/入口
+    val showApk = type == ProjectStore.TYPE_JSAPK || type == ProjectStore.TYPE_JS || type == ProjectStore.TYPE_SCRIPT
     var renaming by remember { mutableStateOf(false) }
     val cfg = remember(dir) {
         val c = JsApkConfig.load(dir)

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
@@ -148,6 +149,7 @@ fun AgentScreen(vm: CandyViewModel) {
         },
     ) {
     androidx.compose.material3.Scaffold(
+        modifier = Modifier.imePadding(),
         containerColor = CandyBg,
         topBar = {
             Row(
@@ -172,25 +174,6 @@ fun AgentScreen(vm: CandyViewModel) {
         },
     ) { pad ->
         Column(modifier = Modifier.fillMaxSize().padding(pad)) {
-            // 阶段提示条：思考中 / 调用工具中 + 停止按钮
-            if (sending || stage.isNotBlank()) {
-                Surface(color = CandySurfaceVariant, modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
-                        Spacer(Modifier.size(8.dp))
-                        Text(stage.ifBlank { "思考中…" }, color = CandyTextDim, fontSize = 12.sp)
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { vm.stopAgent() }) {
-                            Icon(Icons.Default.Stop, contentDescription = null, tint = CandyPrimary, modifier = Modifier.size(12.dp))
-                            Spacer(Modifier.size(4.dp))
-                            Text("停止", color = CandyPrimary, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
@@ -198,29 +181,6 @@ fun AgentScreen(vm: CandyViewModel) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
             ) {
                 items(vm.chat) { msg -> ChatBubble(msg) { option -> input = option } }
-                // 正在生成：助手气泡位置显示加载图标 + 阶段文案（不占顶栏）
-                if (sending) {
-                    item {
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Surface(
-                                color = CandySurface,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth(0.6f),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text("助手", color = CandySecondary, fontSize = 11.sp)
-                                    Spacer(Modifier.size(8.dp))
-                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
-                                    Spacer(Modifier.size(8.dp))
-                                    Text(agentStatusLabel(vm.agentStage.value), color = CandyTextDim, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -391,17 +351,49 @@ private fun ChatBubble(msg: ChatMessage, onPickOption: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth(0.88f),
         ) {
             Column(Modifier.padding(10.dp)) {
-                Text(
-                    when (msg.role) {
-                        ChatMessage.Role.USER -> "我"
-                        ChatMessage.Role.MODEL -> "助手"
-                        ChatMessage.Role.TOOL -> "工具调用"
-                    },
-                    color = if (isUser) CandyPrimary else CandySecondary,
-                    fontSize = 11.sp,
-                )
-                Spacer(Modifier.size(4.dp))
-                Text(msg.text, color = CandyText, fontSize = 13.sp)
+                if (msg.role != ChatMessage.Role.TOOL) {
+                    Text(
+                        when (msg.role) {
+                            ChatMessage.Role.USER -> "我"
+                            ChatMessage.Role.MODEL -> "助手"
+                            ChatMessage.Role.TOOL -> "工具调用"
+                        },
+                        color = if (isUser) CandyPrimary else CandySecondary,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.size(4.dp))
+                }
+                // 思考中： ConversationFlow 里的占位气泡（加载图标 + 阶段文案）
+                if (msg.thinking) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
+                        Spacer(Modifier.size(6.dp))
+                        Text(msg.summary().ifBlank { "思考中…" }, color = CandyTextDim, fontSize = 12.sp)
+                    }
+                } else if (msg.toolName != null) {
+                    // 工具气泡：默认折叠（摘要 + 左侧展开按钮），展开显示参数与结果
+                    var expanded by remember { mutableStateOf(!msg.collapsed) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (expanded) "▼" else "▶",
+                            color = CandyTextDim,
+                            fontSize = 10.sp,
+                            modifier = Modifier.ballClick { expanded = !expanded; msg.collapsed = !expanded },
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text(msg.summary(), color = if (msg.done) CandyTextDim else CandyPrimary, fontSize = 12.sp,
+                            modifier = Modifier.ballClick { expanded = !expanded; msg.collapsed = !expanded })
+                    }
+                    if (expanded) {
+                        Spacer(Modifier.size(4.dp))
+                        Text(msg.text, color = CandyTextDim, fontSize = 11.sp)
+                    }
+                } else if (msg.role == ChatMessage.Role.MODEL) {
+                    // 助手正文按 markdown 渲染（粗体/列表/代码块）
+                    MarkdownText(msg.text)
+                } else {
+                    Text(msg.text, color = CandyText, fontSize = 13.sp)
+                }
                 // 模型用 JSON 提问（真问题）→ 对话框形式呈现问题与选项
                 val question = parseQuestion(msg.text)
                 var answered by remember { mutableStateOf(false) }

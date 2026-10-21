@@ -397,12 +397,12 @@ fun SettingsScreen(vm: CandyViewModel) {
                         }
                         androidx.compose.material3.Slider(
                             value = agentTemp,
-                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 1.0f) },
+                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 2f) },
                             onValueChangeFinished = {
                                 Settings.agentTemperature = agentTemp
                                 Settings.persist(ctx)
                             },
-                            valueRange = 0f..1.0f,
+                            valueRange = 0f..2f,
                             steps = 19,
                         )
                     }
@@ -587,7 +587,6 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
-            item { SectionTitle("开发者与交流") }
             item {
                 Surface(color = CandySurface, onClick = { vm.goDevelopers() }) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

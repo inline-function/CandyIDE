@@ -52,7 +52,7 @@ var agentStream by mutableStateOf(true)   // 流式输出（SSE）
                 props.getProperty("agentKey")?.let { if (it.isNotBlank()) agentKey = it }
                 agentEnabled = props.getProperty("agentEnabled") == "true"
     props.getProperty("agentPrompt")?.let { agentPrompt = it }
-    props.getProperty("agentTemperature")?.toFloatOrNull()?.let { agentTemperature = it.coerceIn(0f, 1.0f) }
+    props.getProperty("agentTemperature")?.toFloatOrNull()?.let { agentTemperature = it.coerceIn(0f, 2f) }
     props.getProperty("agentStream")?.toBooleanStrictOrNull()?.let { agentStream = it }
             }
         }

@@ -165,7 +165,7 @@ fun EditorScreen(vm: CandyViewModel) {
             // 编辑器里有未保存改动才弹条让用户决策（同步/覆盖）；没改过则磁盘即最新，静默跟随
             disk > known && disk > 0 -> {
                 if (vm.dirtyTexts[f.key] == true) externalChange = f
-                else { knownMtimes[f.key] = disk; externalChange = null }
+                else { knownMtimes[f.key] = disk; externalChange = null; vm.followDiskChange() }
             }
         }
     }
