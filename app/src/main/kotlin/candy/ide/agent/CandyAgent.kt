@@ -53,7 +53,26 @@ class CandyAgent(private val ctx: Context) {
     private var firstAskOfSession = true
 
     private fun systemPrompt(): String =
-        (Settings.agentPrompt.trim().ifBlank { DEFAULT_PROMPT }) + "\n\n" + tools.toolDescriptions()
+        // 实际工作路径：agent 不知道工作区在哪会抓瞎，系统提示里直接给绝对路径
+        workspaceContext() + (Settings.agentPrompt.trim().ifBlank { DEFAULT_PROMPT }) + "\n\n" + tools.toolDescriptions()
+
+    /** 工作区 / 当前工程的绝对路径（agent 在终端里跑命令、读写文件要用） */
+    private fun workspaceContext(): String {
+        val root = runCatching { candy.ide.fs.CandyFs.projectRoot(ctx) }.getOrNull()
+        val workspaceReal = root?.let { runCatching { candy.ide.git.GitManager.realPath(it) }.getOrNull() }
+        val proj = tools.currentProjectDir
+        val projReal = proj?.let { runCatching { candy.ide.git.GitManager.realPath(it) }.getOrNull() }
+        return buildString {
+            append("\n【工作区信息】")
+            append("\nIDE 目录: ").append(root?.displayPath ?: "未知")
+            workspaceReal?.let { append("\nIDE 目录真实路径(终端/shell 可用): ").append(it) }
+            if (proj != null) {
+                append("\n当前工程: ").append(proj.name)
+                projReal?.let { append("\n当前工程真实路径(终端/shell 可用): ").append(it) }
+            }
+            append("\n需要工程信息可调用 workspace_info / project_info 工具。\n\n")
+        }
+    }
 
     /** 首轮上下文：把全部 Sublimation 文档与 IDE 文档一次喂给模型，之后随历史携带 */
     private fun docsContext(): String = runCatching {
@@ -79,6 +98,15 @@ class CandyAgent(private val ctx: Context) {
         }
         if (sb.isEmpty()) "" else "\n\n【Sublimation 语言文档与 IDE 文档（全量，工具调用时请参考）】\n" + sb
     }.getOrDefault("")
+
+    /** 上下文占用估算（≈ 字符数/4），UI 进度条用 */
+    fun estimateTokens(): Int {
+        var chars = 0
+        for (e in session.events) {
+            e.content?.parts?.forEach { p -> p.text?.let { chars += it.length + 8 } }
+        }
+        return chars / 4
+    }
 
     init { session = newSession("main") }
 

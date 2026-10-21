@@ -25,12 +25,21 @@ object Settings {
 
     // —— AI agent 配置（OpenAI 兼容端点；ADK 里由 OpenAiModel 消费）——
     var agentEnabled by mutableStateOf(false)   // 悬浮球总开关；关掉不显
+    var agentScope by mutableStateOf("project")   // agent 访问权：readonly/project/workspace/full
     var agentBaseUrl by mutableStateOf("https://discovery-api.intern-ai.org.cn/v1")
     var agentModel by mutableStateOf("Atria-Dawn-Preview")
     var agentKey by mutableStateOf("sk-fc709e80739f2ed067823f527cdedc560550948f9f7d70b7743beef5ad4e4f64")
     var agentPrompt by mutableStateOf("")   // 初始提示词；空则用内置默认
 var agentTemperature by mutableStateOf(1.0f)   // 采样温度 0~2
 var agentStream by mutableStateOf(true)   // 流式输出（SSE）
+
+    // —— git 协同配置 ——
+    var gitUserName by mutableStateOf("")
+    var gitUserEmail by mutableStateOf("")
+    var gitRemote by mutableStateOf("")      // 远程仓库地址（https 或 ssh）
+    var gitAutoCommit by mutableStateOf(true)   // 修改文件自动提交（“修改 xx 文件”）
+    var gitAutoSync by mutableStateOf(false)    // 自动同步云端：进工程拉取 + 自动提交时推送
+    var companionDialogShown by mutableStateOf(false)   // 协同应用对话框已经显示过（点过稍后）
 
     /** 首次拿到 Context 后加载；同时把当前配色方案从磁盘恢复 */
     fun attach(ctx: Context) {
@@ -51,9 +60,16 @@ var agentStream by mutableStateOf(true)   // 流式输出（SSE）
                 props.getProperty("agentModel")?.let { if (it.isNotBlank()) agentModel = it }
                 props.getProperty("agentKey")?.let { if (it.isNotBlank()) agentKey = it }
                 agentEnabled = props.getProperty("agentEnabled") == "true"
+    props.getProperty("agentScope")?.let { if (it.isNotBlank()) agentScope = it }
     props.getProperty("agentPrompt")?.let { agentPrompt = it }
-    props.getProperty("agentTemperature")?.toFloatOrNull()?.let { agentTemperature = it.coerceIn(0f, 2f) }
+    props.getProperty("agentTemperature")?.toFloatOrNull()?.let { agentTemperature = it.coerceIn(0f, 1f) }
     props.getProperty("agentStream")?.toBooleanStrictOrNull()?.let { agentStream = it }
+    props.getProperty("gitUserName")?.let { gitUserName = it }
+    props.getProperty("gitUserEmail")?.let { gitUserEmail = it }
+    props.getProperty("gitRemote")?.let { gitRemote = it }
+    companionDialogShown = props.getProperty("companionDialogShown") == "true"
+    gitAutoCommit = props.getProperty("gitAutoCommit") != "false"
+    gitAutoSync = props.getProperty("gitAutoSync") == "true"
             }
         }
         Schemes.current = Schemes.byId(ctx, schemeId)
@@ -73,9 +89,16 @@ var agentStream by mutableStateOf(true)   // 流式输出（SSE）
                 setProperty("agentModel", agentModel)
                 setProperty("agentKey", agentKey)
                 setProperty("agentEnabled", agentEnabled.toString())
+        setProperty("agentScope", agentScope)
     setProperty("agentPrompt", agentPrompt)
         setProperty("agentTemperature", agentTemperature.toString())
         setProperty("agentStream", agentStream.toString())
+        setProperty("gitUserName", gitUserName)
+        setProperty("gitUserEmail", gitUserEmail)
+        setProperty("gitRemote", gitRemote)
+        setProperty("gitAutoCommit", gitAutoCommit.toString())
+        setProperty("gitAutoSync", gitAutoSync.toString())
+        setProperty("companionDialogShown", companionDialogShown.toString())
             }
             props.store(f.outputStream(), "CandyIDE settings")
         }

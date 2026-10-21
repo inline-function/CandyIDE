@@ -2,6 +2,7 @@ package candy.ide.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,7 +58,7 @@ import candy.ide.ui.theme.CandyTextDim
 import candy.ide.vm.CandyViewModel
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ProjectsScreen(vm: CandyViewModel) {
     var showDialog by remember { mutableStateOf(false) }
@@ -67,8 +68,11 @@ fun ProjectsScreen(vm: CandyViewModel) {
             TopAppBar(
                 title = { CandyTitleWithEgg() },
                 actions = {
-                    IconButton(onClick = { vm.goSettings() }) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置", tint = CandyText)
+                    IconButton(onClick = { vm.goSettings() }, modifier = Modifier.combinedClickable(
+                        onClick = { vm.goSettings() },
+                        onLongClick = { vm.screen.value = Screen.Terminal },
+                    )) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置（长按打开终端）", tint = CandyText)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -161,10 +165,10 @@ private fun ProjectCard(dir: candy.ide.fs.CandyPath, onClick: () -> Unit, onSett
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         when (type) {
-                            ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
+                            ProjectStore.TYPE_JSAPK -> "安卓工程"
                             ProjectStore.TYPE_SCRIPT -> "脚本工程"
-                            ProjectStore.TYPE_MD -> "md 文档工程"
-                            else -> "JS 平台工程"
+                            ProjectStore.TYPE_MD -> "MD工程"
+                            else -> "JS工程"
                         },
                         color = if (type == ProjectStore.TYPE_JSAPK) CandyPrimary else if (type == ProjectStore.TYPE_JS) CandySecondary else CandyTextDim,
                         style = MaterialTheme.typography.labelMedium
@@ -237,7 +241,7 @@ private fun NewProjectDialog(onCreate: (String, String) -> Unit, onDismiss: () -
                         FilterChip(
                             selected = typeSel == 0,
                             onClick = { typeSel = 0 },
-                            label = { Text("JS 平台工程") }
+                            label = { Text("JS工程") }
                         )
                         FilterChip(
                             selected = typeSel == 1,
@@ -249,22 +253,22 @@ private fun NewProjectDialog(onCreate: (String, String) -> Unit, onDismiss: () -
                         FilterChip(
                             selected = typeSel == 2,
                             onClick = { typeSel = 2 },
-                            label = { Text("JS-apk 工程") }
+                            label = { Text("安卓工程") }
                         )
                         FilterChip(
                             selected = typeSel == 3,
                             onClick = { typeSel = 3 },
-                            label = { Text("md 文档工程") }
+                            label = { Text("MD工程") }
                         )
                     }
                 }
                 Spacer(Modifier.size(6.dp))
                 Text(
                     when (typeSel) {
-                        0 -> "编译成 JS 在 WebView 执行，需 fun main() 入口（语言服务已支持）"
-                        1 -> "顶层语句直接解释执行（语言服务诊断待补）"
-                        2 -> "编译成 JS 注进内置模板 APK，在本机直接安装（SDK 首版：固定包名 candy.jsapk.runtime）"
-                        else -> "打包成只读文档 APK：含 md 渲染库与文档文件页，不可编辑"
+                        0 -> "将Subl编译为JS代码，可打包为控制台APK"
+                        1 -> "通过解释器直接执行Subs文件，可打包为控制台APK"
+                        2 -> "使用Subl借助安卓基本库开发安卓APK"
+                        else -> "用于存放文档的工程，可将MD文档包装为只读文档APK"
                     },
                     color = CandyTextDim,
                     style = MaterialTheme.typography.bodySmall

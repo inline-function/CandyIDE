@@ -34,6 +34,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -47,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -74,8 +76,23 @@ fun SettingsScreen(vm: CandyViewModel) {
     var agentModel by remember { mutableStateOf(Settings.agentModel) }
     var agentKey by remember { mutableStateOf(Settings.agentKey) }
     var shizukuInfo by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // 进出活动计数：驱动各权限开关刷新状态（回来后同步）
+    var resumeTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    var pendingTermuxForGit by remember { mutableStateOf(false) }
+    var pendingInstallGit by remember { mutableStateOf(false) }
+    var termuxJustInstalled by remember { mutableStateOf(false) }
     var pendingReset by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf(false) }
+    var pendingResetConfirm by remember { mutableStateOf(false) }
+    var pendingDeleteConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         shizukuState = ShizukuManager.state()
@@ -262,7 +279,7 @@ fun SettingsScreen(vm: CandyViewModel) {
             }
             // 外部文件访问权限：跳系统「所有文件访问」设置页，状态即时回读
             item {
-                var extGranted by remember { mutableStateOf(android.os.Environment.isExternalStorageManager()) }
+                var extGranted by remember(resumeTick) { mutableStateOf(android.os.Environment.isExternalStorageManager()) }
                 val extLauncher = rememberLauncherForActivityResult(
                     androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
                 ) { extGranted = android.os.Environment.isExternalStorageManager() }
@@ -397,12 +414,12 @@ fun SettingsScreen(vm: CandyViewModel) {
                         }
                         androidx.compose.material3.Slider(
                             value = agentTemp,
-                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 2f) },
+                            onValueChange = { agentTemp = (Math.round(it * 10) / 10f).coerceIn(0f, 1f) },
                             onValueChangeFinished = {
                                 Settings.agentTemperature = agentTemp
                                 Settings.persist(ctx)
                             },
-                            valueRange = 0f..2f,
+                            valueRange = 0f..1f,
                             steps = 19,
                         )
                     }
@@ -599,6 +616,80 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
+            item { SectionTitle("git 协同") }
+            item {
+                Surface(color = CandySurface) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text("个人信息", color = CandyText, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.size(8.dp))
+                        TextField(
+                            value = Settings.gitUserName,
+                            onValueChange = { Settings.gitUserName = it; Settings.persist(ctx) },
+                            label = { Text("用户名") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        TextField(
+                            value = Settings.gitUserEmail,
+                            onValueChange = { Settings.gitUserEmail = it; Settings.persist(ctx) },
+                            label = { Text("邮箱") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        TextField(
+                            value = Settings.gitRemote,
+                            onValueChange = { Settings.gitRemote = it; Settings.persist(ctx) },
+                            label = { Text("远程仓库地址（https / ssh）") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("修改文件自动提交", color = CandyText)
+                                Spacer(Modifier.size(2.dp))
+                                Text("保存 / 删除 / 新建时以“修改 xx.xx 文件”的名义自动提交", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = Settings.gitAutoCommit, onCheckedChange = { Settings.gitAutoCommit = it; Settings.persist(ctx) })
+                        }
+                        Spacer(Modifier.size(8.dp))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("自动同步云端", color = CandyText)
+                                Spacer(Modifier.size(2.dp))
+                                Text("进入工程自动拉取；开启自动提交时一并推送到云端（手动推送不受影响）", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = Settings.gitAutoSync, onCheckedChange = { Settings.gitAutoSync = it; Settings.persist(ctx) })
+                        }
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface, onClick = {
+                    when {
+                        vm.gitReady.value -> Toast.makeText(ctx, "您已安装git", Toast.LENGTH_SHORT).show()
+                        !vm.termuxInstalled.value -> pendingTermuxForGit = true
+                        else -> pendingInstallGit = true
+                    }
+                }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("安装 git", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text(
+                                if (vm.gitReady.value) "已安装 ✓（点击再装一次）"
+                                else if (vm.termuxInstalled.value) "通过 Termux 安装（pkg install git）"
+                                else "需要先安装 Termux",
+                                color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
             item { SectionTitle("结束") }
             item {
                 Surface(color = CandySurface, onClick = { vm.closeIde(ctx) }) {
@@ -635,34 +726,140 @@ fun SettingsScreen(vm: CandyViewModel) {
             }
         }
     }
-    // 重置 IDE：确认框（权限保留，其余全删 → 冷启动）
+// 安装 git 需要先装 Termux
+    if (pendingTermuxForGit) {
+        // Termux 装好了：自动关闭并进入"是否安装 git"
+        LaunchedEffect(vm.termuxInstalled.value) {
+            if (vm.termuxInstalled.value) {
+                pendingTermuxForGit = false
+                pendingInstallGit = true
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { pendingTermuxForGit = false },
+            title = { Text("需要先安装 Termux") },
+            text = {
+                Text("安装 git 需要协同应用 Termux。\n安装后回到 IDE 会自动继续。\n下载页：f-droid.org/packages/com.termux/")
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.openUrl(ctx, "https://f-droid.org/packages/com.termux/") }) { Text("打开下载页") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingTermuxForGit = false }) { Text("稍后") }
+            },
+        )
+    }
+    // 询问是否安装 git
+    if (pendingInstallGit) {
+        LaunchedEffect(vm.termuxInstalled.value) {
+            if (!vm.termuxInstalled.value) pendingInstallGit = false
+        }
+        AlertDialog(
+            onDismissRequest = { pendingInstallGit = false },
+            title = { Text("是否安装 git") },
+            text = { Text("将通过 Termux 执行 pkg install git，需要网络。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingInstallGit = false
+                    vm.installGit(ctx) { ok ->
+                        vm.gitResult.value = if (ok) "git 安装成功" else "git 安装失败"
+                    }
+                }) { Text("安装") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingInstallGit = false }) { Text("稍后") }
+            },
+        )
+    }
+    // 重置 IDE：两级确认（第二级需输入 CandyIDE）
     if (pendingReset) {
+        var resetInput by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { pendingReset = false },
             title = { Text("重置 IDE") },
-            text = { Text("将删除整个 IDE 目录（含全部工程）并清空应用数据。\n除了已授予的目录权限之外一切都会重置，效果等同于卸载重装。\n是否继续？") },
+            text = {
+                Text("重置IDE会导致IDE当前所处的IDE目录被删除，IDE自身的私有目录也会被删除，仅保留IDE被授予的权限，是否继续？")
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    pendingReset = false
-                    vm.resetIde(ctx)
-                }) { Text("重置") }
+                TextButton(onClick = { pendingResetConfirm = true }) { Text("继续") }
             },
             dismissButton = { TextButton(onClick = { pendingReset = false }) { Text("取消") } },
         )
     }
-    // 删除 IDE：确认框（删目录 + 撤授权 + 系统卸载）
+    if (pendingResetConfirm) {
+        var confirmInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { pendingResetConfirm = false },
+            title = { Text("最后一步") },
+            text = {
+                Column {
+                    Text("这是最后一步操作，完成之后不可逆，如果您想重置IDE，请输入 CandyIDE，然后点击确定")
+                    Spacer(Modifier.size(8.dp))
+                    TextField(
+                        value = confirmInput,
+                        onValueChange = { confirmInput = it },
+                        singleLine = true,
+                        isError = confirmInput.isNotEmpty() && confirmInput != "CandyIDE",
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (confirmInput == "CandyIDE") {
+                            pendingResetConfirm = false
+                            vm.resetIde(ctx)
+                        }
+                    },
+                    enabled = confirmInput == "CandyIDE",
+                ) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { pendingResetConfirm = false }) { Text("取消") } },
+        )
+    }
+    // 删除（卸载）IDE：两级确认
     if (pendingDelete) {
         AlertDialog(
             onDismissRequest = { pendingDelete = false },
-            title = { Text("删除 IDE") },
-            text = { Text("将删除整个 IDE 目录、撤销目录授权，并跳转到系统的卸载页面。\n此操作不可撤销，是否继续？") },
+            title = { Text("卸载 IDE") },
+            text = {
+                Text("卸载IDE会导致IDE当前所处的IDE目录被删除，IDE自身的私有目录也会被删除，仅保留IDE被授予的权限，是否继续？")
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    pendingDelete = false
-                    vm.deleteIde(ctx)
-                }) { Text("删除") }
+                TextButton(onClick = { pendingDeleteConfirm = true }) { Text("继续") }
             },
             dismissButton = { TextButton(onClick = { pendingDelete = false }) { Text("取消") } },
+        )
+    }
+    if (pendingDeleteConfirm) {
+        var confirmInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { pendingDeleteConfirm = false },
+            title = { Text("最后一步") },
+            text = {
+                Column {
+                    Text("这是最后一步操作，完成之后不可逆，如果您想卸载IDE，请输入 CandyIDE，然后点击确定")
+                    Spacer(Modifier.size(8.dp))
+                    TextField(
+                        value = confirmInput,
+                        onValueChange = { confirmInput = it },
+                        singleLine = true,
+                        isError = confirmInput.isNotEmpty() && confirmInput != "CandyIDE",
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (confirmInput == "CandyIDE") {
+                            pendingDeleteConfirm = false
+                            vm.deleteIde(ctx)
+                        }
+                    },
+                    enabled = confirmInput == "CandyIDE",
+                ) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDeleteConfirm = false }) { Text("取消") } },
         )
     }
 }
@@ -713,3 +910,4 @@ private fun openCandyA11ySettings(ctx: android.content.Context) {
         )
     }
 }
+

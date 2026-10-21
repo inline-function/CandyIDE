@@ -2,6 +2,7 @@ package candy.ide.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +33,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -182,10 +188,53 @@ fun AgentScreen(vm: CandyViewModel) {
             ) {
                 items(vm.chat) { msg -> ChatBubble(msg) { option -> input = option } }
             }
+            // token 用量进度条（编辑框上方）
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val maxTokens = 64000
+                val used = vm.agentTokens.intValue.coerceAtLeast(0)
+                val ratio = (used.toFloat() / maxTokens).coerceIn(0f, 1f)
+                LinearProgressIndicator(
+                    progress = { ratio },
+                    modifier = Modifier.weight(1f).height(3.dp),
+                    color = if (ratio > 0.8f) candy.ide.ui.theme.CandyPrimary else candy.ide.ui.theme.CandyTextDim,
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "可用 " + (maxTokens - used) + " token",
+                    color = candy.ide.ui.theme.CandyTextDim,
+                    fontSize = 10.sp,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 访问权：只读 / 当前工程 / 当前IDE目录 / 完全访问
+                var scopeMenu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { scopeMenu = true }) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = "访问权",
+                            tint = candy.ide.ui.theme.CandyPrimary,
+                        )
+                    }
+                    DropdownMenu(expanded = scopeMenu, onDismissRequest = { scopeMenu = false }) {
+                        candy.ide.agent.CandyToolRegistry.AgentScope.entries.forEach { s ->
+                            DropdownMenuItem(
+                                text = { Text(s.label) },
+                                onClick = {
+                                    candy.ide.data.Settings.agentScope = s.key
+                                    candy.ide.data.Settings.persist(ctx)
+                                    scopeMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
                 // 附件（文件 / 图片）：点开选择方式
                 IconButton(onClick = { attachPicker = true }, enabled = !sending) {
                     Icon(Icons.Default.AttachFile, contentDescription = "添加附件", tint = CandyTextDim)

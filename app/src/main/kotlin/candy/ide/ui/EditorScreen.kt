@@ -161,11 +161,11 @@ fun EditorScreen(vm: CandyViewModel) {
         when {
             // 切换文件：先清旧标记（这个 effect 因 safe 变化而重跑）
             known == null -> { knownMtimes[f.key] = disk; externalChange = null }
-            // 已知 mtime 且磁盘更新：
-            // 编辑器里有未保存改动才弹条让用户决策（同步/覆盖）；没改过则磁盘即最新，静默跟随
+            // 已知 mtime 且磁盘更新（agent/git/termux 或其它外部改动）：直接以磁盘为准重载，不再询问
             disk > known && disk > 0 -> {
-                if (vm.dirtyTexts[f.key] == true) externalChange = f
-                else { knownMtimes[f.key] = disk; externalChange = null; vm.followDiskChange() }
+                knownMtimes[f.key] = disk
+                externalChange = null
+                vm.reloadCurrentFromDisk()
             }
         }
     }
@@ -204,9 +204,9 @@ fun EditorScreen(vm: CandyViewModel) {
                             Column {
                                 Text(
                                     when (currentProject?.let { ProjectStore.typeOf(it) }) {
-                                        ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
+                                        ProjectStore.TYPE_JSAPK -> "安卓工程"
                                         ProjectStore.TYPE_SCRIPT -> "脚本工程"
-                                        else -> "JS 平台工程"
+                                        else -> "JS工程"
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = CandyTextDim,
@@ -338,17 +338,17 @@ fun EditorScreen(vm: CandyViewModel) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = "运行（长按打包 APK）", tint = CandySecondary, modifier = Modifier.size(21.dp))
                                 }
                             }
-                            // 第 4 按钮：短按 = 输出/日志抽屉；长按 = 终端（仿终端界面，意图连 Termux）
+                            // 第 4 按钮：短按 = 输出/日志抽屉；长按 = git 页（未装 git 提示安装）
                             Box(
                                 modifier = Modifier.size(44.dp).combinedClickable(
                                     onClick = { vm.openDrawerTab(vm.drawerTab) },
-                                    onLongClick = { vm.screen.value = Screen.Terminal },
+                                    onLongClick = { vm.openGitPage(ctx) },
                                 ),
                                 contentAlignment = androidx.compose.ui.Alignment.Center,
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.List,
-                                    contentDescription = "输出/日志/诊断（长按打开终端）",
+                                    contentDescription = "输出/日志/诊断（长按打开 git 页）",
                                     tint = if (logOpen) CandyPrimary else CandyText)
                             }
                             var moreMenu by remember { mutableStateOf(false) }
@@ -468,34 +468,6 @@ fun EditorScreen(vm: CandyViewModel) {
                                         }
                                     }
                                 )
-                            }
-                        }
-                    }
-                    // 外部修改提示条：文件被外部改动，点击以磁盘内容重载，或保存覆盖之
-                    val changed = externalChange
-                    if (changed != null && changed == currentFile) {
-                        Surface(color = Color(0xFFFFF3C4), contentColor = Color(0xFF6B4E00)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.size(6.dp))
-                                Text(
-                                    "文件已被修改，点击以同步修改，或保存覆盖修改",
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = {
-                                    // 同步：丢弃编辑器正文，重载磁盘内容
-                                    vm.reloadCurrentFromDisk()
-                                    externalChange = null
-                                }) { Text("同步") }
-                                TextButton(onClick = {
-                                    val ed = editor ?: return@TextButton
-                                    vm.saveCurrent(ed.text.toString())
-                                    externalChange = null
-                                }) { Text("覆盖") }
                             }
                         }
                     }

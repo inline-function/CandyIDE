@@ -8,4 +8,4 @@
 // 用法：fun f[T: Num](n: T): T = n   →  f(1)、f(1.5) 合法，f(true) 报 E-NO-INSTANCE。
 class Num { }
 
-impl Num for Rat { }
+impl Num for Rat

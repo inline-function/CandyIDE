@@ -135,10 +135,10 @@ fun ProjectSettingsScreen(vm: CandyViewModel, dir: candy.ide.fs.CandyPath) {
                 }
             }
             item { SectionRow("工程类型", when (type) {
-                ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
+                ProjectStore.TYPE_JSAPK -> "安卓工程"
                 ProjectStore.TYPE_SCRIPT -> "脚本工程"
-                ProjectStore.TYPE_MD -> "md 文档工程"
-                else -> "JS 平台工程"
+                ProjectStore.TYPE_MD -> "MD工程"
+                else -> "JS工程"
             }) }
             if (showApk) {
                 item { SectionTitle(if (isJsApk) "打包（APK）" else "打包（APK · 控制台模式）") }

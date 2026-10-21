@@ -6,6 +6,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import candy.ide.data.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +39,7 @@ import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
 import candy.ide.vm.CandyViewModel
 
-enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent }
+enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git }
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
@@ -117,6 +122,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
         Screen.IdeLog -> IdeLogScreen(vm)
         Screen.Terminal -> TerminalScreen(vm)
         Screen.Agent -> AgentScreen(vm)
+        Screen.Git -> GitScreen(vm)
     }
 
     // 全局安装反馈：等待框 / 成功「是否打开」/ 失败提示
@@ -184,5 +190,30 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
             text = { Text("Shizuku 不可用：$msg\n请在设置里连接 Shizuku，或用其它应用安装。") },
             confirmButton = { TextButton(onClick = { vm.installError.value = null }) { Text("确定") } },
         )
+    }
+}
+
+@Composable
+private fun CompanionRow(name: String, url: String, installed: Boolean, onOpen: () -> Unit) {
+    Surface(
+        color = candy.ide.ui.theme.CandySurface,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp).clickable(onClick = onOpen),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                if (installed) "✓" else "✗",
+                color = if (installed) candy.ide.ui.theme.CandyPrimary else androidx.compose.ui.graphics.Color(0xFFE5656E),
+                fontSize = 16.sp,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(name, color = candy.ide.ui.theme.CandyText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(url, color = candy.ide.ui.theme.CandyTextDim, fontSize = 10.sp)
+            }
+            Text("打开", color = candy.ide.ui.theme.CandyPrimary, fontSize = 12.sp)
+        }
     }
 }

@@ -156,7 +156,7 @@ fun TerminalScreen(vm: CandyViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            promptText(cwd, homeDir()),
+                            promptText(cwd, homeDir(ctx)),
                             color = TermAccent, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
                             maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             modifier = Modifier.weight(0.35f, fill = false),
@@ -168,7 +168,7 @@ fun TerminalScreen(vm: CandyViewModel) {
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(onGo = {
                                 val cmd = input.trim()
-                                if (cmd.isNotEmpty() && !busy) { input = ""; submitCmd(ctx, scope, lines, cmd, cwd, busy, { busy = it }, { cwd = it }) }
+                                if (cmd.isNotEmpty() && !busy) { input = ""; submitCmd(ctx, scope, lines, cmd, cwd, busy, { busy = it }, { cwd = it }) { vm.syncAfterFsChange() } }
                             }),
                             singleLine = true,
                             textStyle = TextStyle(color = TermFg, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
@@ -207,8 +207,12 @@ private fun TextButtonTiny(label: String, enabled: Boolean, onClick: () -> Unit)
     )
 }
 
-private fun homeDir(): String =
-    System.getProperty("user.home", "/data/data/com.termux/files/home")
+private fun homeDir(ctx: android.content.Context): String {
+    // 默认目录 = 用户选择的 IDE 目录（SAF 存储目录）的真实路径；拿不到才回退 Termux 家目录
+    val root = runCatching { candy.ide.fs.CandyFs.projectRoot(ctx) }.getOrNull()
+    val real = root?.let { runCatching { candy.ide.git.GitManager.realPath(it) }.getOrNull() }
+    return if (!real.isNullOrBlank()) real else "/data/data/com.termux/files/home"
+}
 
 private fun shizukuHint(): String =
     if (candy.ide.data.ShizukuManager.state() == candy.ide.data.ShizukuManager.State.RUNNING_GRANTED) "已授权，命令直连执行"
@@ -250,6 +254,7 @@ private fun submitCmd(
     busy: Boolean,
     setBusy: (Boolean) -> Unit,
     setCwd: (String) -> Unit,
+    onDone: () -> Unit = {},
 ) {
     if (busy) return
     val home = System.getProperty("user.home", "/data/data/com.termux/files/home")
@@ -270,7 +275,7 @@ private fun submitCmd(
         return
     }
     lines.add(TermLine(promptText(cwd, home) + trimmed, TermLine.Kind.CMD))
-    submit(ctx, scope, lines, trimmed, cwd) { setBusy(it) }
+    submit(ctx, scope, lines, trimmed, cwd, { setBusy(it) }, onDone)
 }
 
 private fun submit(
@@ -280,6 +285,7 @@ private fun submit(
     cmd: String,
     cwd: String? = null,
     setBusy: (Boolean) -> Unit = {},
+    onDone: () -> Unit = {},
 ) {
     lines.add(TermLine("candy$ " + cmd, TermLine.Kind.CMD))
     setBusy(true)
@@ -306,6 +312,8 @@ private fun submit(
             TerminalBridge.Channel.NONE -> lines.add(TermLine(res.output, TermLine.Kind.ERR))
             else -> lines.add(TermLine(res.output, TermLine.Kind.ERR))
         }
+        // 终端命令可能改了工程文件：同步文件树与编辑框（不询问，直接以磁盘为准）
+        onDone()
         setBusy(false)
     }
 }

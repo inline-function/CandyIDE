@@ -15,7 +15,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import candy.ide.git.fsPath
 import candy.ide.data.DiagItem
 import candy.ide.data.ProjectStore
 import candy.ide.data.Settings
@@ -268,6 +270,16 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     else -> dir.child("hello.subl").writeText(DEMO_SOURCE)
                 }
+                // 自动初始化 git 仓库（Termux 未装/git 未就绪时静默跳过，进 git 页会引导）
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        candy.ide.git.GitManager.initRepo(getApplication(), dir, "初始化工程 " + name)
+                        if (candy.ide.data.Settings.gitUserName.isNotBlank())
+                            candy.ide.git.GitManager.configIdentity(getApplication(), dir.fsPath() ?: "", candy.ide.data.Settings.gitUserName, candy.ide.data.Settings.gitUserEmail)
+                        if (candy.ide.data.Settings.gitRemote.isNotBlank())
+                            candy.ide.git.GitManager.setRemote(getApplication(), dir.fsPath() ?: "", candy.ide.data.Settings.gitRemote)
+                    } catch (e: Exception) { }
+                }
                 main.post { refreshProjects(); openProject(dir) }
             }
         }
@@ -320,11 +332,13 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
         mdLogUser("**[工程]** 已打开 `" + dir.name + "`（" +
             when (ProjectStore.typeOf(dir)) {
-                ProjectStore.TYPE_JSAPK -> "JS-apk 工程"
+                ProjectStore.TYPE_JSAPK -> "安卓工程"
                 ProjectStore.TYPE_SCRIPT -> "脚本工程"
-                ProjectStore.TYPE_MD -> "md 文档工程"
-                else -> "JS 平台工程"
+                ProjectStore.TYPE_MD -> "MD工程"
+                else -> "JS工程"
             } + "）")
+        // 自动同步云端：进入工程时检测云端更新
+        if (candy.ide.data.Settings.gitAutoSync) checkCloudUpdates(getApplication())
     }
 
     /** 日志页的 `文件名：行` 超链接：工程内找同名文件并跳到指定行（0-based） */
@@ -381,6 +395,15 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             dirtyTexts[f.key] = true
         } else {
             dirtyTexts.remove(f.key)
+        }
+    }
+
+    /** agent/git/termux 改过文件后的统一同步：树刷新 + 编辑器直接以磁盘为准重载（无询问） */
+    fun syncAfterFsChange() {
+        main.post {
+            followDiskChange()
+            treeVersion.intValue++
+            resumeNonce.intValue++
         }
     }
 
@@ -499,6 +522,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     // —— AI agent ——
     val chat = mutableStateListOf<ChatMessage>()
     val agentBusy = mutableStateOf(false)
+    val agentTokens = mutableIntStateOf(0)   // 上下文 token 用量（编辑框上方进度条）
     val agentStage = mutableStateOf("")   // "思考中…/调用工具 list_project_files…/空"
     /** 往期对话存档 */
     val conversations = mutableStateListOf<AgentConversation>()
@@ -509,6 +533,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun askAgent(ctx: android.content.Context, text: String) {
         if (agentBusy.value) return
         if (agent == null) agent = candy.ide.agent.CandyAgent(ctx.applicationContext)
+        agentTokens.intValue = agent!!.estimateTokens()
         agent!!.apply {
             tools.currentFile = currentFile.value
             tools.currentProjectDir = currentProject.value
@@ -998,6 +1023,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     runFailed.value = false
                     main.post { savedTextsVersion.intValue++ }
                     mdLogUser("**[保存]** `" + file.name + "`")
+                    // git 自动提交：修改 xx.xx 文件
+                    autoCommitIfEnabled(getApplication(), "修改 " + file.name + " 文件")
                 }
                 .onFailure { mdLogUser("**[保存失败]** " + (it.message ?: it.javaClass.simpleName)) }
         }
@@ -1192,7 +1219,211 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-/** 脚本工程打包：顶层语句包一层 @impure fun main，落进 build/__entry__.subl 再走标准链路 */
+// ==================== git 协同 ====================
+
+    /** 协同应用安装状态（进出活动时刷新；UI 与首次对话框共用） */
+    val shizukuInstalled = mutableStateOf(false)
+    val termuxInstalled = mutableStateOf(false)
+    val gitReady = mutableStateOf(false)
+
+    /** git 安装中 / git 操作中的加载态 */
+    val gitBusy = mutableStateOf(false)
+    val gitMsg = mutableStateOf("")
+    /** git 操作结果（GitScreen 拉条提示用） */
+    val gitResult = mutableStateOf<String?>(null)
+    /** 云端更新信息：>0 表示云端有 n 个提交未拉取 */
+    val cloudBehind = mutableIntStateOf(0)
+    val cloudConflict = mutableStateOf<String?>(null)
+
+    /** 进出活动时刷新协同应用安装状态；齐了就刷新 git 就绪态 */
+    fun refreshCompanions(ctx: android.content.Context) {
+        val wasShizuku = shizukuInstalled.value
+        val wasTermux = termuxInstalled.value
+        shizukuInstalled.value = candy.ide.git.GitManager.isShizukuInstalled(ctx)
+        termuxInstalled.value = candy.ide.git.GitManager.isTermuxInstalled(ctx)
+        if (!wasTermux && termuxInstalled.value) {
+            // 刚装好 Termux：顺手查 git 就绪
+            viewModelScope.launch {
+                gitReady.value = candy.ide.git.GitManager.isGitReady(ctx)
+            }
+        } else if (termuxInstalled.value && !gitReady.value) {
+            viewModelScope.launch {
+                gitReady.value = candy.ide.git.GitManager.isGitReady(ctx)
+            }
+        }
+        
+    }
+
+    /** 日志按钮长按：进 git 页（未就绪先引导安装） */
+    fun openGitPage(ctx: android.content.Context) {
+        viewModelScope.launch {
+            if (candy.ide.git.GitManager.isGitReady(ctx)) {
+                screen.value = Screen.Git
+                checkCloudUpdates(ctx)
+            } else {
+                gitInstallNeeded.value = true
+            }
+        }
+    }
+
+    /** 「尚未安装协同应用」与「尚未安装 git」两个引导对话框的开关 */
+    val companionDialog = mutableStateOf(false)
+    val gitInstallNeeded = mutableStateOf(false)
+    val gitInitDialog = mutableStateOf(false)
+
+    /** 安装 git（pkg install git -y）：期间显示加载框 */
+    fun installGit(ctx: android.content.Context, onDone: (Boolean) -> Unit = {}) {
+        gitBusy.value = true
+        gitMsg.value = "正在安装 git…"
+        viewModelScope.launch {
+            val r = candy.ide.git.GitManager.installGit(ctx)
+            gitReady.value = r.ok
+            gitBusy.value = false
+            gitMsg.value = ""
+            onDone(r.ok)
+        }
+    }
+
+    /** 检测云端更新（进入工程 / git 操作前调用） */
+    fun checkCloudUpdates(ctx: android.content.Context) {
+        val proj = currentProject.value ?: return
+        if (!candy.ide.git.GitManager.isRepoInitialized(proj)) return
+        syncAfterFsChange()
+        viewModelScope.launch {
+            val info = candy.ide.git.GitManager.fetchAndCheckAhead(ctx, proj)
+            cloudBehind.intValue = info.behind
+            if (info.error != null && info.error.contains("conflict", ignoreCase = true)) {
+                cloudConflict.value = info.error
+            }
+        }
+    }
+
+    /** 打开链接（应用商店 / 下载页） */
+    fun openUrl(ctx: android.content.Context, url: String) {
+        runCatching {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(intent)
+        }.onFailure { toast.value = "没有可打开链接的应用" }
+    }
+
+    // ---- git 页面操作 ----
+
+    /** 本地提交计数（默认存档名“第 n 次推送”用） */
+    private var gitCommitCount = 0
+
+    fun refreshCommitCount(ctx: android.content.Context) {
+        val proj = currentProject.value ?: return
+        viewModelScope.launch {
+            gitCommitCount = candy.ide.git.GitManager.commitCount(ctx, proj)
+        }
+    }
+
+    fun nextCommitName(): String = "第 " + Math.max(1, gitCommitCount + 1) + " 次推送"
+
+    /** 推送：提交到本地（短按）/ 推送云端（长按） */
+    fun gitCommit(ctx: android.content.Context, message: String, pushToRemote: Boolean, onDone: (String) -> Unit = {}) {
+        val proj = currentProject.value ?: run { onDone("未打开工程"); return }
+        gitBusy.value = true
+        gitMsg.value = if (pushToRemote) "提交并推送至云端…" else "保存到本地仓库…"
+        viewModelScope.launch {
+            try {
+                val r = candy.ide.git.GitManager.commitAll(ctx, proj, message)
+                var msg = if (r.ok) "已提交：" + message else "提交失败：" + r.output.take(300)
+                if (r.ok && pushToRemote) {
+                    val pr = candy.ide.git.GitManager.push(ctx, proj)
+                    msg = if (pr.ok) "已推送至云端" else "推送失败：" + pr.output.take(300)
+                }
+                if (r.ok) refreshCommitCount(ctx)
+                syncAfterFsChange()
+                onDone(msg)
+            } finally {
+                gitBusy.value = false
+                gitMsg.value = ""
+                onAgentTurnDone()
+            }
+        }
+    }
+
+    /** 丢弃：还原未提交的修改到最近保存 */
+    fun gitDiscard(ctx: android.content.Context, onDone: (String) -> Unit = {}) {
+        val proj = currentProject.value ?: run { onDone("未打开工程"); return }
+        gitBusy.value = true
+        gitMsg.value = "正在还原到最近保存…"
+        viewModelScope.launch {
+            val r = candy.ide.git.GitManager.discardChanges(ctx, proj)
+            gitBusy.value = false
+            gitMsg.value = ""
+            gitResult.value = if (r.ok) "已还原到最近保存" else "还原失败：" + r.output.take(300)
+            onAgentTurnDone()
+            syncAfterFsChange()
+            onDone(gitResult.value ?: "")
+        }
+    }
+
+    /** 回退到指定提交 */
+    fun gitReset(ctx: android.content.Context, ref: String, onDone: (String) -> Unit = {}) {
+        val proj = currentProject.value ?: run { onDone("未打开工程"); return }
+        gitBusy.value = true
+        gitMsg.value = "正在回退…"
+        viewModelScope.launch {
+            val r = candy.ide.git.GitManager.resetTo(ctx, proj, ref)
+            gitBusy.value = false
+            gitMsg.value = ""
+            gitResult.value = if (r.ok) "已回退" else "回退失败：" + r.output.take(300)
+            onAgentTurnDone()
+            syncAfterFsChange()
+            onDone(gitResult.value ?: "")
+        }
+    }
+
+    /** 拉取云端更新 */
+    fun gitPull(ctx: android.content.Context, onDone: (String) -> Unit = {}) {
+        val proj = currentProject.value ?: run { onDone("未打开工程"); return }
+        gitBusy.value = true
+        gitMsg.value = "正在拉取云端更新…"
+        viewModelScope.launch {
+            val r = candy.ide.git.GitManager.pull(ctx, proj)
+            gitBusy.value = false
+            gitMsg.value = ""
+            cloudConflict.value = if (r.output.contains("CONFLICT", ignoreCase = true)) r.output.take(400) else null
+            gitResult.value = if (r.ok) "已拉取云端更新" else r.output.take(300).ifBlank { "拉取失败" }
+            onAgentTurnDone()
+            syncAfterFsChange()
+            onDone(gitResult.value ?: "")
+        }
+    }
+
+    /** 提交历史（版本回退列表） */
+    fun gitLog(ctx: android.content.Context, onDone: (List<candy.ide.git.GitManager.CommitInfo>) -> Unit = {}) {
+        val proj = currentProject.value ?: run { onDone(emptyList()); return }
+        viewModelScope.launch {
+            onDone(candy.ide.git.GitManager.log(ctx, proj))
+        }
+    }
+
+    /** 工程目录的文件修改自动提交（保存/删除/新建时调用，自动提交开关开启时） */
+    fun autoCommitIfEnabled(ctx: android.content.Context, message: String) {
+        if (!candy.ide.data.Settings.gitAutoCommit) return
+        val proj = currentProject.value ?: return
+        if (!candy.ide.git.GitManager.isRepoInitialized(proj)) return
+        viewModelScope.launch {
+            var r = candy.ide.git.GitManager.commitAll(ctx, proj, message)
+            if (r.ok && candy.ide.data.Settings.gitAutoSync) {
+                candy.ide.git.GitManager.push(ctx, proj)
+            }
+            Unit
+        }
+    }
+
+    /** 终端默认目录：SAF 选的存储根（CandyIDE 目录）真实路径 */
+    fun terminalCwd(ctx: android.content.Context): String {
+        val root = candy.ide.fs.CandyFs.projectRoot(ctx) ?: return ""
+        val real = candy.ide.git.GitManager.realPath(root)
+        return real ?: ""
+    }
+
+    /** 脚本工程打包：顶层语句包一层 @impure fun main，落进 build/__entry__.subl 再走标准链路 */
     fun buildScriptApkProject(dir: CandyPath) {
         if (running.value) return
         running.value = true
@@ -1536,6 +1767,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             mdTextMode.remove(f.key)
             val ok = ProjectStore.deleteFile(f)
             if (ok) {
+                autoCommitIfEnabled(getApplication(), "删除 " + f.name + (if (f.isDirectory()) " 目录" else " 文件"))
                 val idx = openFiles.indexOf(f)
                 if (idx >= 0) main.post { closeTab(idx) }
                 main.post { treeVersion.intValue++ }

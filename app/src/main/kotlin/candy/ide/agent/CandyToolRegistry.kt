@@ -11,7 +11,15 @@ import com.google.adk.kt.tools.BaseTool
  */
 class CandyToolRegistry(private val ctx: Context) {
 
-    /** 当前打开的文件（由编辑页注入，agent 读它） */
+        enum class AgentScope(val label: String, val key: String) {
+        READONLY("只读", "readonly"), PROJECT("当前工程", "project"),
+        WORKSPACE("当前IDE目录", "workspace"), FULL("完全访问", "full"),
+    }
+
+    fun scope(): AgentScope = AgentScope.entries.firstOrNull { it.key == Settings.agentScope } ?: AgentScope.PROJECT
+    /** 写 / 执行类操作的统一守卫：只读模式下拒绝 */
+    fun mayWrite(): Boolean = scope() != AgentScope.READONLY
+/** 当前打开的文件（由编辑页注入，agent 读它） */
     @Volatile var currentFile: candy.ide.fs.CandyPath? = null
 
     /** 当前诊断快照（由 VM 注入；DiagItem 来自 candy.ide.data） */
@@ -39,6 +47,12 @@ class CandyToolRegistry(private val ctx: Context) {
             }.getOrElse { "读取失败: ${it.message}" }
         },
         "run_shell" to { args ->
+            if (!mayWrite()) return@to "当前为只读访问权，无法执行命令"
+            if (scope() == AgentScope.PROJECT) {
+                // 当前工程模式：shell 只能在工程目录里跑
+                val cwd = currentProjectDir ?: return@to "没有打开工程，当前访问权只允许在工程内执行"
+            }
+
             val cmd = args["command"] as? String
             if (cmd.isNullOrBlank()) return@to "参数 command 必填"
             // 走 Shizuku（若已授权）；否则提示
@@ -81,6 +95,8 @@ class CandyToolRegistry(private val ctx: Context) {
             }.getOrElse { "读取失败: ${it.message}" }
         },
         "write_current_file" to { args ->
+            if (!mayWrite()) return@to "当前为只读访问权，无法写文件"
+
             val content = args["content"] as? String
             if (content == null) return@to "参数 content 必填"
             val f = currentFile
@@ -96,18 +112,58 @@ class CandyToolRegistry(private val ctx: Context) {
                 (if (f.isDirectory()) "[目录] " else "") + f.name
             } ?: "工程目录为空"
         },
+        // 当前工程信息：真实路径 / 类型 / 文件数 / 当前文件 —— agent 干活前先看这个
+        "project_info" to { _ ->
+            val root = currentProjectDir
+            if (root == null || !root.isDirectory()) "没有打开工程"
+            else buildString {
+                append("工程目录(真实路径): ").append(candy.ide.git.GitManager.realPath(root) ?: root.displayPath).append("\n")
+                append("工程目录(IDE 路径): ").append(root.displayPath).append("\n")
+                append("工程类型: ").append(
+                    when (candy.ide.data.ProjectStore.typeOf(root)) {
+                        candy.ide.data.ProjectStore.TYPE_JSAPK -> "安卓工程"
+                        candy.ide.data.ProjectStore.TYPE_SCRIPT -> "脚本工程"
+                        candy.ide.data.ProjectStore.TYPE_MD -> "MD工程"
+                        else -> "JS工程"
+                    },
+                ).append("\n")
+                val files = root.walk().filter { it.isFile() }.toList()
+                append("文件总数: ").append(files.size).append("\n")
+                currentFile?.let { append("当前打开文件: ").append(it.name).append("\n") }
+            }
+        },
+        // 工作区（IDE 目录）真实路径与工程清单
+        "workspace_info" to { _ ->
+            val root = currentProjectDir?.parent
+            buildString {
+                append("工作区: ").append(root?.displayPath ?: "未知").append("\n")
+                root?.let { r ->
+                    append("工作区真实路径: ").append(candy.ide.git.GitManager.realPath(r) ?: "(SAF 目录树)").append("\n")
+                    r.listFiles()?.sortedBy { it.name }?.forEach { d ->
+                        if (d.isDirectory()) append("[工程] ").append(d.name).append("\n")
+                    }
+                }
+                currentProjectDir?.let { append("当前工程真实路径: ").append(candy.ide.git.GitManager.realPath(it) ?: "(SAF)").append("\n") }
+            }
+        },
         // ---- UI 按键工具：替 agent 按编辑页的按钮，比 shell 更直接 ----
         "tap_run" to { _ ->
+            if (!mayWrite()) return@to "当前为只读访问权，无法执行运行"
+
             val a = onTapRun
             if (a == null) "IDE 没有打开编辑器，无法运行"
             else { a.invoke(); "已点运行按钮：保存并编译运行当前工程，输出在终端页/控制台" }
         },
         "long_press_run" to { _ ->
+            if (!mayWrite()) return@to "当前为只读访问权，无法打包"
+
             val a = onLongPressRun
             if (a == null) "IDE 没有打开编辑器，无法打包"
             else { a.invoke(); "已长按运行按钮：开始把当前工程打包成 APK，进度在终端日志，完成后会提示安装" }
         },
         "tap_save" to { _ ->
+            if (!mayWrite()) return@to "当前为只读访问权，无法保存"
+
             val a = onTapSave
             if (a == null) "IDE 没有打开编辑器，无法保存"
             else { a.invoke(); "已点保存按钮：当前文件已落盘" }
@@ -118,6 +174,8 @@ class CandyToolRegistry(private val ctx: Context) {
             else { onGotoLine?.invoke(line); "已跳转到第 " + line + " 行" }
         },
         "edit_current_file" to { args ->
+            if (!mayWrite()) return@to "当前为只读访问权，无法编辑文件"
+
             // 别名直达写入：内容塞进编辑器再保存（走黄色顶条/文件树的标准链路）
             val content = args["content"] as? String
             if (content == null) "参数 content 必填（完整的新文件全文）"
@@ -146,6 +204,8 @@ class CandyToolRegistry(private val ctx: Context) {
         arr.put(fn("read_current_file", "读取编辑器当前打开的文件全文", noProps))
         arr.put(fn("run_shell", "经 Shizuku 执行 shell 命令并返回输出", cmdProps, listOf("command")))
         arr.put(fn("list_project_files", "列出当前工程的文件清单", noProps))
+        arr.put(fn("project_info", "获取当前工程的信息：真实文件路径、工程类型、文件数量、当前打开的文件。开始任何工程操作前先调用", noProps))
+        arr.put(fn("workspace_info", "获取工作区（IDE 目录）的真实绝对路径与工程清单。需要在终端里跑命令（git/打包等）时用它拿到真实路径", noProps))
         arr.put(fn("list_diagnostics", "当前编辑器的编译诊断", noProps))
         arr.put(fn("get_project_tree", "当前工程的目录树（忽略 build/隐藏目录）", noProps))
         arr.put(fn("read_project_file", "读工程内任意文件", pathProps, listOf("path")))
@@ -200,11 +260,13 @@ class CandyToolRegistry(private val ctx: Context) {
 5. get_project_tree —— 当前工程的目录树（无参数，忽略 build/ 等生成目录）
 6. read_project_file {"path": "工程内相对路径，如 src/main.subl"} —— 读工程内任意文件
 7. write_current_file {"content": "完整的新文件全文"} —— 覆写编辑器当前打开的文件
-8. tap_run —— 点运行按钮：保存并编译运行当前工程（无参数，输出在终端）
-9. long_press_run —— 长按运行按钮：把当前工程打包成 APK（无参数；想编译/运行用 tap_run，想打包成应用用它）
-10. tap_save —— 点保存按钮：保存当前文件（无参数）
-11. goto_line {"line": 行号} —— 编辑器跳转到指定行（行号从 1 开始）
-12. edit_current_file {"content": "完整的新文件全文"} —— 替换当前编辑器内容并保存（走编辑器标准链路）
+8. project_info —— 当前工程信息：真实文件路径、工程类型、文件数、当前文件（无参数，干活前先调）
+9. workspace_info —— 工作区（IDE 目录）真实绝对路径与工程清单（无参数，跑终端命令前先调）
+10. tap_run —— 点运行按钮：保存并编译运行当前工程（无参数，输出在终端）
+11. long_press_run —— 长按运行按钮：把当前工程打包成 APK（无参数；想编译/运行用 tap_run，想打包成应用用它）
+12. tap_save —— 点保存按钮：保存当前文件（无参数）
+13. goto_line {"line": 行号} —— 编辑器跳转到指定行（行号从 1 开始）
+14. edit_current_file {"content": "完整的新文件全文"} —— 替换当前编辑器内容并保存（走编辑器标准链路）
 
 【优先级】要运行工程用 tap_run，要打包成 APK 用 long_press_run，要改文件用 edit_current_file，
 不要用 run_shell 模拟按键动作。""".trimIndent()
