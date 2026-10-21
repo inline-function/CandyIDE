@@ -99,6 +99,112 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
             },
         )
     }
+    // ---- 协同应用检测（首次使用）----
+    var companionDismissed by remember { mutableStateOf(Settings.companionDialogShown) }
+    var gitInitDeferred by remember { mutableStateOf(false) }
+
+    // 进出活动时刷新协同应用安装状态（对话框里的叉/勾跟着更新）
+    val lifecycleOwner2 = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner2) {
+        vm.refreshCompanions(ctx)
+        val observer2 = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.refreshCompanions(ctx)
+        }
+        lifecycleOwner2.lifecycle.addObserver(observer2)
+        onDispose { lifecycleOwner2.lifecycle.removeObserver(observer2) }
+    }
+
+    val workspaceReady = !pendingFirstUse
+    val needCompanion = workspaceReady && !companionDismissed &&
+        !(vm.shizukuInstalled.value && vm.termuxInstalled.value)
+    if (needCompanion) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("尚未安装协同应用") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("CandyIDE 需要协同应用才能提供终端与 git 能力。安装后回到 IDE 会自动更新状态。", fontSize = 12.sp)
+                    CompanionRow(
+                        name = "Shizuku",
+                        url = "https://shizuku.rikka.app/download",
+                        installed = vm.shizukuInstalled.value,
+                        onOpen = { vm.openUrl(ctx, "https://shizuku.rikka.app/download") },
+                    )
+                    CompanionRow(
+                        name = "Termux",
+                        url = "https://f-droid.org/packages/com.termux/",
+                        installed = vm.termuxInstalled.value,
+                        onOpen = { vm.openUrl(ctx, "https://f-droid.org/packages/com.termux/") },
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    Settings.companionDialogShown = true
+                    Settings.persist(ctx)
+                    companionDismissed = true
+                }) { Text("稍后") }
+            },
+        )
+    }
+
+    // git 初始化引导：Termux 已装但 git 未装（首进工程 / 检测刷新发现刚装好 Termux）
+    LaunchedEffect(vm.termuxInstalled.value, vm.gitReady.value) {
+        if (workspaceReady && vm.termuxInstalled.value && !vm.gitReady.value &&
+            !gitInitDeferred && !vm.gitInitDialog.value && !vm.gitInstallNeeded.value
+        ) {
+            vm.gitInitDialog.value = true
+        }
+    }
+    if (vm.gitInstallNeeded.value) {
+        AlertDialog(
+            onDismissRequest = { vm.gitInstallNeeded.value = false },
+            title = { Text("尚未安装 git") },
+            text = { Text("git 操作需要 Termux 里的 git。要现在安装吗？\n（会调用 Termux 执行 pkg install git）") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.gitInstallNeeded.value = false
+                    vm.installGit(ctx) { ok -> vm.gitResult.value = if (ok) "git 安装成功" else "git 安装失败" }
+                }) { Text("安装") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.gitInstallNeeded.value = false }) { Text("稍后") }
+            },
+        )
+    }
+    if (vm.gitInitDialog.value) {
+        AlertDialog(
+            onDismissRequest = { vm.gitInitDialog.value = false; gitInitDeferred = true },
+            title = { Text("尚未初始化 git") },
+            text = { Text("检测到 Termux 但还没有安装 git，是否初始化 git？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.gitInitDialog.value = false
+                    vm.installGit(ctx)
+                }) { Text("初始化") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.gitInitDialog.value = false
+                    gitInitDeferred = true
+                }) { Text("稍后") }
+            },
+        )
+    }
+    // git 安装/操作的加载框
+    if (vm.gitBusy.value) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                    Text(vm.gitMsg.value.ifBlank { "正在处理…" })
+                }
+            },
+        )
+    }
     LaunchedEffect(Unit) {
         vm.bootstrap()
     }
