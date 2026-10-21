@@ -1174,7 +1174,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 val apk = candy.ide.jsapk.MdApkBuilder.build(getApplication(), dir, cfg) { n ->
                     mdLog("**[打包]** 收集到 " + n + " 篇文档")
                 }
-                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 在工程 build/ 目录")
+                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
                 mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
                 main.post { runFailed.value = false }
                 if (Settings.silentInstall) installPkg(apk, cfg.pkg)
@@ -1211,9 +1211,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     .map { if (it.isBlank()) "" else "  " + it }
                     .joinToString("\n")
                 val wrapperText = "@impure\nfun main() {\n" + body + "\n}\n"
-                val buildDir = dir.child("build")
-                if (!buildDir.isDirectory()) buildDir.createDirectory("build")
-                val wrapper = buildDir.child("__entry__.subl")
+                // 临时入口放工程根（JsApkBuilder 以入口所在目录为工程根，build/ 由它自建；
+                // 放 build/ 下会导致 build/build/ 嵌套，SAF 抛错）
+                val wrapper = dir.child("__entry__.subl")
                 wrapper.writeText(wrapperText)
                 val cfg = JsApkConfig(
                     pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
@@ -1222,8 +1222,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 val apk = JsApkBuilder.build(getApplication(), wrapper, cfg, onCompiled = { ms ->
                     mdLog("**[编译完成]** 用时 " + fmtElapsed(ms))
                 })
-                wrapper.delete()
-                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 在工程 build/ 目录")
+                runCatching { wrapper.delete() }
+                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
                 mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
                 main.post { runFailed.value = false }
                 if (Settings.silentInstall) installPkg(apk, cfg.pkg)
@@ -1232,6 +1232,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     pendingApk.value = apk
                 }
             } catch (t: Throwable) {
+                runCatching { dir.find("__entry__.subl")?.delete() }
                 mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
                 mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
             } finally {
@@ -1276,7 +1277,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     mdLog("**[编译完成]** 用时 " + fmtElapsed(ms))
                 })
                 val sizeKb = apk.length() / 1024
-                mdLog("**[打包完成]** " + apk.name + " " + sizeKb + " KB · 在工程 build/ 目录")
+                mdLog("**[打包完成]** " + apk.name + " " + sizeKb + " KB · 路径 " + apk.displayPath)
                 main.post { runFailed.value = false }
                 if (cfg.pkg != JsApkConfig.DEFAULT_PACKAGE) mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
                 if (Settings.silentInstall) installPkg(apk, cfg.pkg)

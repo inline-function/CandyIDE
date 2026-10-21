@@ -140,8 +140,13 @@ object JsApkBuilder {
         // 全程 runCatching 兜底；写入前先 createNewFile 建出真实文件
         // 只有确实没有 build 时才 createDirectory，否则 SAF 会生成 "build (1)"…
         val outDir = parent.find("build") ?: parent.createDirectory("build")
-            ?: throw RuntimeException("无法创建 build 目录")
-        val apk = outDir.child("app.apk")
+        // APK 输出：优先 build/ 子目录；部分 SAF provider 不允许新建子目录里再建文件，兜底落工程根
+        val apk = try {
+            (outDir ?: parent).child("app.apk")
+        } catch (e: Exception) {
+            android.util.Log.w("CandyAgent", "build/ 不可写，APK 落工程根: " + e.message)
+            parent.child("app.apk")
+        }
         tmp.inputStream().use { ins -> apk.outputStream().use { out -> ins.copyTo(out) } }
         ApkSigner.signV1(apk, entries)
         return apk

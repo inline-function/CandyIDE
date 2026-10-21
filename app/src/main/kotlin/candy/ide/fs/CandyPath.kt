@@ -122,8 +122,17 @@ sealed interface CandyPath {
         private fun createDocFile(displayName: String): CandyPath? =
             doc.createFile("application/octet-stream", displayName)?.let { Saf(ctx, it) }
         override fun createNewFile(): Boolean = createDocFile(name) != null
-        override fun createDirectory(name: String): CandyPath? =
-            doc.createDirectory(name)?.let { Saf(ctx, it) }
+        override fun createDirectory(name: String): CandyPath? {
+            // SAF createFile/createDirectory 偶发返回 null（目录落盘异步）：短暂重试
+            var tries = 0
+            while (tries < 6) {
+                val created = doc.createDirectory(name)
+                if (created != null) return Saf(ctx, created)
+                tries++
+                if (tries < 6) Thread.sleep(150L)
+            }
+            return null
+        }
         override fun delete(): Boolean = doc.delete()
         override fun renameTo(target: CandyPath): Boolean = doc.renameTo(target.name)
         override fun copyTo(target: CandyPath, overwrite: Boolean): Boolean = runCatching {
@@ -145,7 +154,20 @@ sealed interface CandyPath {
             doc.listFiles().firstOrNull { it.name == name }?.let { Saf(ctx, it) }
         override fun child(name: String): CandyPath {
             val found = doc.listFiles().firstOrNull { it.name == name }
-            return if (found != null) Saf(ctx, found) else Saf(ctx, doc.createFile("*/*", name)!!)
+            if (found != null) return Saf(ctx, found)
+            // SAF 树里不存在则创建空文件（打包写 app.apk 前的占位）。
+            // createDirectory 之后立即 createFile 在部分 provider 上偶发返回 null（目录落盘异步）：短暂重试
+            var created: DocumentFile? = null
+            var tries = 0
+            while (created == null && tries < 6) {
+                created = doc.createFile("application/octet-stream", name)
+                if (created == null) {
+                    tries++
+                    if (tries < 6) Thread.sleep(150L)
+                }
+            }
+            if (created == null) throw java.io.IOException("无法在该目录下创建 " + name + "（SAF 目录不可写）")
+            return Saf(ctx, created)
         }
         override fun uri(): Uri = doc.uri
         override val extension: String

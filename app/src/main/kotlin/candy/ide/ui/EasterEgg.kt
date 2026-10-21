@@ -1,18 +1,14 @@
 package candy.ide.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,9 +21,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import candy.ide.ui.theme.CandyBg
 import candy.ide.ui.theme.CandyPrimary
 import candy.ide.ui.theme.CandyText
@@ -40,7 +41,7 @@ private val KAOMOJIS = listOf(
     "(o^-^o)", "(^_^)/",
 )
 
-/** 点击标题/颜文字弹出的随机文本（悬浮窗 5 秒消失，类似编辑页诊断悬浮窗） */
+/** 点击标题/颜文字弹出的随机文本 */
 private val EGG_TEXTS = listOf(
     "长按编辑页的保存可以保存整个工程哦~",
     "长按编辑页的撤回可以拉起时间回溯条哦~",
@@ -71,7 +72,7 @@ private val EGG_TEXTS = listOf(
     "本喵明明什么坏事也没做喵",
     "你是无理数吗？",
     "我没有时间考虑过去，我只考虑未来",
-    "我才不怕■■，一提到■■我就高兴！",
+    "我才不擅■■，一提到■■我就高兴！",
     "你什么时候能飞的这么高了？",
     "从没觉得组乐队开心过！",
     "有哪些优秀的百合作品？",
@@ -97,21 +98,27 @@ private val EGG_TEXTS = listOf(
 )
 
 /**
- * 主页标题：CandyIDE + 随机颜文字；点击弹悬浮提示（5 秒自动消失，再点立即换新）。
- * 颜文字每次进入主页随机一次（ fontSize 与标题同行的次要角色）。
+ * 主页标题：CandyIDE + 随机颜文字。点击弹真悬浮窗（Popup，不参与父布局、不顶起标题），
+ * 显示在颜文字右下，可拖动，5 秒自动消失；再点立即换新文本并重置计时。
  */
 @Composable
 fun CandyTitleWithEgg() {
-    // 每次进入主页随机一个颜文字
+    val density = LocalDensity.current
     val kaomoji = remember { KAOMOJIS.random() }
-    var egg by remember { mutableStateOf<String?>(null) }
+    var eggIndex by remember { mutableIntStateOf(-1) }
     var tick by remember { mutableIntStateOf(0) }
+    // 悬浮窗位置（px）：初始在标题行右下（颜文字右侧偏下，可遮挡右上角设置按钮）
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+    var dragTick by remember { mutableIntStateOf(0) }
+    val shown = eggIndex >= 0
     val pick: () -> Unit = {
-        val pool = EGG_TEXTS.toMutableList()
-        egg?.let { cur -> pool.remove(cur) }
-        egg = pool.random()
+        val pool = (EGG_TEXTS.indices).filter { it != eggIndex }
+        eggIndex = pool.random()
         tick++
     }
+    val text = if (eggIndex in EGG_TEXTS.indices) EGG_TEXTS[eggIndex] else null
+
     Box {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -128,40 +135,56 @@ fun CandyTitleWithEgg() {
                 modifier = Modifier.eggClick(onClick = pick),
             )
         }
-        // 悬浮提示：绝对定位在标题行右下方（颜文字右边，可遮挡右上角的设置按钮），
-        // 不参与布局测量（wrapContentSize unbounded），标题不会被顶起；5 秒自动消失
-        egg?.let { text ->
-            Surface(
-                color = CandyBg,
-                shape = RoundedCornerShape(8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CandyPrimary),
-                shadowElevation = 6.dp,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset(x = 150.dp, y = 30.dp)
-                    .wrapContentSize(unbounded = true)
-                    .eggClick(onClick = pick),
+        // 真悬浮窗：Popup 独立于父布局，标题永远不会被顶起
+        if (shown && text != null) {
+            val baseX = with(density) { 150.dp.toPx() }
+            val baseY = with(density) { 32.dp.toPx() }
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset((baseX + offsetX).toInt(), (baseY + offsetY).toInt()),
+                properties = PopupProperties(focusable = false),
+                onDismissRequest = {},
             ) {
-                Text(
-                    text,
-                    color = CandyText,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                )
+                Surface(
+                    color = CandyBg,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, CandyPrimary),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectDragGestures(
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                offsetX += dragAmount.x
+                                offsetY += dragAmount.y
+                                dragTick++
+                            },
+                        )
+                    },
+                ) {
+                    Text(
+                        text,
+                        color = CandyText,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    )
+                }
             }
-            // tick 变化（再次点击）即重置 5 秒倒计时
-            LaunchedEffect(tick, egg) {
+            // 5 秒自动消失；点击或拖动都会重置倒计时
+            LaunchedEffect(tick, dragTick) {
                 delay(5000L)
-                egg = null
+                eggIndex = -1
+                // 复位拖动偏移，下次弹出回到初始位置
+                offsetX = 0f
+                offsetY = 0f
             }
         }
     }
 }
 
-/** 无水波纹的轻量点击（标题、颜文字、悬浮提示共用） */
+/** 无水波纹的轻量点击（标题、颜文字共用） */
 @Composable
 private fun Modifier.eggClick(onClick: () -> Unit): Modifier {
-    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val interactionSource = remember { MutableInteractionSource() }
     return this.then(
         Modifier.clickable(
             interactionSource = interactionSource,
