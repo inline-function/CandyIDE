@@ -524,8 +524,23 @@ fun EditorScreen(vm: CandyViewModel) {
                                                 // word==label 全删；label 以 word 为前缀（输入 v 选 var）也删掉，避免 vvar
                                                 val start = if (word.equals(label, ignoreCase = true) ||
                                                     (word.isNotEmpty() && label.startsWith(word, ignoreCase = true))) we else left
+                                                // 模板随缩进：除首行外每行补上当前行的行首缩进，
+                                                // 否则模板永远顶在第一列
+                                                var ls = start
+                                                while (ls > 0 && content[ls - 1] != '\n') ls--
+                                                var iIndent = ls
+                                                val indBuilder = StringBuilder()
+                                                while (iIndent < start && (content[iIndent] == ' ' || content[iIndent] == '\t')) {
+                                                    indBuilder.append(content[iIndent])
+                                                    iIndent++
+                                                }
+                                                val ind = indBuilder.toString()
+                                                val tplIndented = if (ind.isEmpty()) tpl else {
+                                                    val parts = tpl.split("\n")
+                                                    (listOf(parts.first()) + parts.drop(1).map { ind + it }).joinToString("\n")
+                                                }
                                                 val batch = try { content.beginBatchEdit(); true } catch (_: Throwable) { false }
-                                                try { content.replace(start, cursor.right, tpl) }
+                                                try { content.replace(start, cursor.right, tplIndented) }
                                                 finally { if (batch) content.endBatchEdit() }
                                                 vm.onEditorTextChanged(content.toString())
                                                 vm.saveCurrent(content.toString())
