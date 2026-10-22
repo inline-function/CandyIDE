@@ -651,7 +651,11 @@ fun EditorScreen(vm: CandyViewModel) {
                                         }
                                         LongMenuRow("转到定义") {
                                             longMenu = null
-                                            ed?.let { goToDefinition(vm, it, menu.line, menu.col) }
+                                            ed?.let { goToDefinition(vm, it, menu.line, menu.col, word) }
+                                        }
+                                        LongMenuRow("查看文档") {
+                                            longMenu = null
+                                            ed?.let { showHoverDoc(vm, it, menu.line, menu.col, word) }
                                         }
                                         LongMenuRow("重命名") {
                                             longMenu = null
@@ -1169,7 +1173,7 @@ private fun goToDefinitionAt(vm: CandyViewModel, editor: CodeEditor, line: Int, 
             }
         }
     }
-    goToDefinition(vm, editor, line, col)
+    goToDefinition(vm, editor, line, col, word)
 }
 
 /** 关键词模板：与 LSP 的 KEYWORDS snippet 对应（补全长按生成完整语句） */
@@ -1188,10 +1192,84 @@ private val KEYWORD_TEMPLATES = mapOf(
     "is" to "is ",
 )
 
-/** 在工程内找定义（fun/val/var/class/struct/enum 后面同名者），跳过去 */
-private fun goToDefinition(vm: CandyViewModel, editor: CodeEditor, line: Int, col: Int) {
-    val word = wordAt(editor, line, col) ?: return vm.mdLogUser("**[转到定义]** 光标处没有标识符")
+/** 长按菜单「查看文档」：LSP hoverFor 的文档（符号文档 / 关键字文档 / 内建函数文档）打到日志页 */
+private fun showHoverDoc(vm: CandyViewModel, editor: CodeEditor, line: Int, col: Int, presetWord: String? = null) {
+    val word = presetWord ?: wordAt(editor, line, col) ?: return vm.mdLogUser("**[文档]** 光标处没有标识符")
+    val name = vm.currentFile.value?.name ?: return vm.mdLogUser("**[文档]** 未打开工程")
+    val posLine = if (presetWord != null) editor.cursor.leftLine else line
+    val posCol = if (presetWord != null) editor.cursor.leftColumn else col
+    val hover = runCatching {
+        vm.analysis()?.hoverFor(name, sugared.functor.lsp.Position(posLine, posCol))
+    }.getOrNull()
+    val text = when (val c = hover?.contents) {
+        is String -> c
+        is sugared.functor.lsp.MarkupContent -> c.value
+        else -> ""
+    }
+    if (text.isBlank()) return vm.mdLogUser("**[文档]** `" + word + "` 没有文档记录")
+    vm.mdLogUser("**[文档]** `" + word + "`\n" + text.trim().take(600))
+}
+
+/**
+ * 在工程内找定义（fun/val/var/class/struct/enum 后面同名者），跳过去。
+ * 优先走 LSP 的 definitionFor（本文件符号 + stdlib 兜底），失败再退到正则扫描工程。
+ */
+private fun goToDefinition(vm: CandyViewModel, editor: CodeEditor, line: Int, col: Int, presetWord: String? = null) {
+    val word = presetWord ?: wordAt(editor, line, col) ?: return vm.mdLogUser("**[转到定义]** 光标处没有标识符")
     val project = vm.currentProject.value ?: return vm.mdLogUser("**[转到定义]** 未打开工程")
+    // 长按菜单带选区词进来时，用编辑器光标位置（选词后光标就在词上，比长按事件的行列可靠）
+    val posLine = if (presetWord != null) editor.cursor.leftLine else line
+    val posCol = if (presetWord != null) editor.cursor.leftColumn else col
+    // 1) LSP definitionFor：本文件符号 / stdlib 符号都能定位
+    val name = vm.currentFile.value?.name
+    if (name != null) {
+        val loc = runCatching {
+            if (presetWord != null) vm.analysis()?.definitionOfWord(name, presetWord)
+            else vm.analysis()?.definitionFor(name, sugared.functor.lsp.Position(posLine, posCol))
+        }.getOrNull()
+        if (loc != null) {
+            val uri = loc.uri
+            val ln = loc.range.start.line
+            when {
+                // stdlib：file:/data/.../stdlib/xxx.subl（Windows 上是 file:/F:/…，统一按 file: 前缀识别）→ 打开只读页
+                uri.startsWith("file:") -> {
+                    val base = uri.substringAfterLast('/')
+                    vm.openStdlib(base, ln + 1)
+                    return
+                }
+                // 本文件符号
+                uri == name -> {
+                    val ed2 = editor
+                    runCatching { ed2.setSelection(ln.coerceAtLeast(0), loc.range.start.character, true) }
+                    return vm.mdLogUser("**[转到定义]** `" + word + "` -> " + name + ":" + (ln + 1))
+                }
+                else -> {
+                    // 工程内其它文件（LSP 的 uri 与文件名一致）
+                    val target = project.walk().firstOrNull { it.isFile() && it.name == uri }
+                    if (target != null) {
+                        vm.openFile(target)
+                        vm.requestGoto(ln)
+                        return vm.mdLogUser("**[转到定义]** `" + word + "` -> " + uri)
+                    }
+                }
+            }
+        }
+        // 内建符号（print 等）没有源码定义：LSP 定位不到，但有 prelude 文档 → 说明它是编译器内建
+        if (name != null) {
+            val hover = runCatching {
+                vm.analysis()?.hoverFor(name, sugared.functor.lsp.Position(posLine, posCol))
+            }.getOrNull()
+            val text = when (val c = hover?.contents) {
+                is String -> c
+                is sugared.functor.lsp.MarkupContent -> c.value
+                else -> ""
+            }
+            if (text.isNotBlank()) {
+                return vm.mdLogUser("**[转到定义]** `" + word + "` 是编译器内建函数（无源码）： " + text.replace("\n", "  ").take(160))
+            }
+        }
+    }
+    // 2) 正则扫描工程兜底（LSP 没覆盖到的声明形式）
     val pattern = Regex("\\b(fun|val|var|class|struct|enum)\\s+" + Regex.escape(word) + "\\b")
     val files = project.walk().filter { it.isFile() && it.extension in setOf("subl", "subs") }
     for (f in files) {
@@ -1202,7 +1280,7 @@ private fun goToDefinition(vm: CandyViewModel, editor: CodeEditor, line: Int, co
         vm.requestGoto(targetLine)
         return vm.mdLogUser("**[转到定义]** `" + word + "` -> " + f.name)
     }
-    vm.mdLogUser("**[转到定义]** 工程内未找到 `" + word + "` 的定义")
+    vm.mdLogUser("**[转到定义]** 工程与标准库内未找到 `" + word + "` 的定义")
 }
 
 /**

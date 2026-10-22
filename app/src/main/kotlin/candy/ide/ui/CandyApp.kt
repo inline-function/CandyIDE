@@ -41,7 +41,7 @@ import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
 import candy.ide.vm.CandyViewModel
 
-enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource }
+enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource, Stdlib }
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
@@ -312,6 +312,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
                 LinkItem("Shizuku", "https://github.com/RikkaApps/Shizuku"),
             ),
         )
+        Screen.Stdlib -> StdlibViewerScreen(vm)
     }
 
     // 全局安装反馈：等待框 / 成功「是否打开」/ 失败提示

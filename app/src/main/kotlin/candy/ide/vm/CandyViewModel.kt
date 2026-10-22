@@ -388,6 +388,29 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 标准库只读查看（转到定义的 stdlib 目标） */
+    val stdlibFile = mutableStateOf<candy.ide.fs.CandyPath?>(null)
+
+    /** 打开标准库文件到只读页；name 可带相对路径，行号 1-based */
+    fun openStdlib(name: String, line: Int) {
+        val base = name.substringAfterLast('/').substringAfterLast('\\')
+        val dir = java.io.File(candy.ide.engine.Engine.root(getApplication()), "stdlib")
+        val target = dir.walkTopDown().firstOrNull { it.isFile && it.name == base }
+        if (target != null) {
+            stdlibFile.value = candy.ide.fs.CandyPath.Local(target)
+            pendingGotoLine = (line - 1).coerceAtLeast(0)
+            screen.value = Screen.Stdlib
+            mdLogUser("**[转到定义]** stdlib/`" + base + ":" + line + "`（只读）")
+        } else {
+            mdLogUser("**[转到定义]** 标准库里找不到 `" + base + "`")
+        }
+    }
+
+    fun closeStdlib() {
+        stdlibFile.value = null
+        screen.value = Screen.Editor
+    }
+
     /** 编辑器正文加载源：有未保存修改的标签页保留修改过的正文，否则读磁盘 */
     fun loadTextFor(file: CandyPath): String =
         dirtyTexts[file.key]?.let { savedTexts[file.key] } ?: file.readText()
