@@ -1967,6 +1967,29 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrNull()
     }
 
+    /** 光标处的函数签名提示（LSP signatureHelpFor）：输入实参时显示被调函数签名 */
+    fun computeSignatureHelp(line: Int, col: Int): String? {
+        val f = currentFile.value ?: return null
+        if (f.extension == "md") return null
+        val analysis = analysis() ?: return null
+        val help = runCatching {
+            analysis.signatureHelpFor(f.name, sugared.functor.lsp.Position(line, col))
+        }.getOrNull() ?: return null
+        val sig = help.signatures.getOrNull(help.activeSignature) ?: return null
+        if (sig.parameters.isEmpty()) return null
+        // 高亮当前实参：label 按参数分段，当前参数包方括号
+        val active = help.activeParameter.coerceIn(0, sig.parameters.lastIndex)
+        return buildString {
+            val pre = sig.parameters.subList(0, active).joinToString(", ") { it.label }
+            val cur = sig.parameters[active].label
+            val post = sig.parameters.subList(active + 1, sig.parameters.size).joinToString(", ") { it.label }
+            append("(")
+            if (pre.isNotEmpty()) append(pre + ", ")
+            append("【" + cur + "】")
+            if (post.isNotEmpty()) append(", " + post)
+            append(")")
+        }
+    }
     /** 灯泡：当前文件可用的快速修正（LSP codeActions） */
     data class QuickFix(
         val title: String,

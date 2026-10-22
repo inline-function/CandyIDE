@@ -10,6 +10,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,11 +90,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.unit.sp
 import candy.ide.data.ProjectStore
 import candy.ide.editor.SoraEditorView
 import candy.ide.md.MarkdownText
 import candy.ide.ui.theme.CandyBg
+import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyPrimary
 import candy.ide.ui.theme.CandySecondary
 import candy.ide.ui.theme.CandySurface
@@ -135,6 +142,10 @@ fun EditorScreen(vm: CandyViewModel) {
     val isEditableFile = safe != null && !isMdProject &&
         (!safe.name.endsWith(".md") || vm.mdTextMode[safe.key] == true)
     var longMenu by remember { mutableStateOf<LongPressMenu?>(null) }
+    var outlineOpen by remember { mutableStateOf(false) }
+    var sigTick by remember { mutableIntStateOf(0) }
+    var sigLabel by remember { mutableStateOf<String?>(null) }
+    var outlineSymbols by remember { mutableStateOf<List<sugared.functor.lsp.DocumentSymbol>?>(null) }
     var quickMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var diagInfo by remember { mutableStateOf<candy.ide.data.DiagItem?>(null) }
     var quickWord by remember { mutableStateOf<String?>(null) }
@@ -379,6 +390,10 @@ fun EditorScreen(vm: CandyViewModel) {
                                         },
                                     )
                                     DropdownMenuItem(
+                                        text = { Text("符号大纲") },
+                                        onClick = { moreMenu = false; outlineOpen = true },
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("格式化文档") },
                                         onClick = {
                                             moreMenu = false
@@ -548,6 +563,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                 onCursorChange = { line, col ->
                                     cursorLine = line
                                     cursorCol = col
+                                    sigTick++  // 触发签名提示重算（防抖在下面的 effect 里）
                                 },
                                 onTextChange = vm::onEditorTextChanged,
                             )
@@ -562,6 +578,33 @@ fun EditorScreen(vm: CandyViewModel) {
                                     }
                                     vm.consumeGoto()
                                 }
+                            }
+                        }
+                        // 签名提示：光标在实参区时编辑器底部显示被调函数签名（150ms 防抖）
+                        LaunchedEffect(sigTick) {
+                            if (sigTick == 0) return@LaunchedEffect
+                            kotlinx.coroutines.delay(150)
+                            val (ln, c) = cursorLine to cursorCol
+                            sigLabel = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                runCatching { vm.computeSignatureHelp(ln, c) }.getOrNull()
+                            }
+                        }
+                        sigLabel?.let { label ->
+                            Surface(
+                                modifier = Modifier
+                                    .align(androidx.compose.ui.Alignment.BottomStart)
+                                    .fillMaxWidth(),
+                                color = CandySurfaceVariant.copy(alpha = 0.95f),
+                                tonalElevation = 3.dp,
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = CandyText,
+                                    fontSize = 12.sp,
+                                    maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                )
                             }
                         }
                         if (active != null && active.name.endsWith(".md", ignoreCase = true)) {
@@ -656,6 +699,10 @@ fun EditorScreen(vm: CandyViewModel) {
                                         LongMenuRow("查看文档") {
                                             longMenu = null
                                             ed?.let { showHoverDoc(vm, it, menu.line, menu.col, word) }
+                                        }
+                                        LongMenuRow("查找引用") {
+                                            longMenu = null
+                                            ed?.let { findReferences(vm, it, menu.line, menu.col, word) }
                                         }
                                         LongMenuRow("重命名") {
                                             longMenu = null
@@ -1047,6 +1094,50 @@ fun EditorScreen(vm: CandyViewModel) {
         )
     }
 
+    // 符号大纲对话框
+    if (outlineOpen) {
+        val f = currentFile
+        LaunchedEffect(outlineOpen, f) {
+            outlineSymbols = runCatching {
+                f?.let { vm.analysis()?.documentSymbols(it.name) }
+            }.getOrNull()
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { outlineOpen = false },
+            title = { Text(f?.name ?: "符号大纲", color = CandyText) },
+            text = {
+                val syms = outlineSymbols
+                if (syms == null) {
+                    Text("正在分析…", color = CandyTextDim, fontSize = 12.sp)
+                } else if (syms.isEmpty()) {
+                    Text("本文件没有符号，或语言服务未就绪", color = CandyTextDim, fontSize = 12.sp)
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        items(syms) { s ->
+                            Text(
+                                text = s.name + (s.detail?.takeIf { it.isNotBlank() }?.let { "  —  " + it } ?: ""),
+                                color = CandyPrimary,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        outlineOpen = false
+                                        vm.requestGoto(s.range.start.line.coerceAtLeast(0))
+                                    }
+                                    .padding(vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { outlineOpen = false }) { Text("关闭") }
+            },
+        )
+    }
     renameReq?.let { req ->
         var newName by remember(req) { mutableStateOf(req.word) }
         AlertDialog(
@@ -1210,6 +1301,24 @@ private fun showHoverDoc(vm: CandyViewModel, editor: CodeEditor, line: Int, col:
     vm.mdLogUser("**[文档]** `" + word + "`\n" + text.trim().take(600))
 }
 
+/** 长按菜单「查找引用」：LSP referencesFor 的引用位置打到日志页（goto 链接可点跳） */
+private fun findReferences(vm: CandyViewModel, editor: CodeEditor, line: Int, col: Int, presetWord: String? = null) {
+    val word = presetWord ?: wordAt(editor, line, col) ?: return vm.mdLogUser("**[查找引用]** 光标处没有标识符")
+    val name = vm.currentFile.value?.name ?: return vm.mdLogUser("**[查找引用]** 未打开工程")
+    val posLine = if (presetWord != null) editor.cursor.leftLine else line
+    val posCol = if (presetWord != null) editor.cursor.leftColumn else col
+    val locs = runCatching {
+        vm.analysis()?.referencesFor(name, sugared.functor.lsp.Position(posLine, posCol)) ?: emptyList()
+    }.getOrDefault(emptyList())
+    if (locs.isEmpty()) return vm.mdLogUser("**[查找引用]** `" + word + "` 在本文件没有引用")
+    val lines = locs.mapIndexed { i, l ->
+        val ln = l.range.start.line + 1
+        val c = l.range.start.character + 1
+        "${i + 1}. `goto://" + name + ":" + ln + ":" + c + "`"
+    }.joinToString("\n")
+    vm.mdLogUser("**[查找引用]** `" + word + "` — " + locs.size + " 处：\n" + lines)
+}
+
 /**
  * 在工程内找定义（fun/val/var/class/struct/enum 后面同名者），跳过去。
  * 优先走 LSP 的 definitionFor（本文件符号 + stdlib 兜底），失败再退到正则扫描工程。
@@ -1226,6 +1335,9 @@ private fun goToDefinition(vm: CandyViewModel, editor: CodeEditor, line: Int, co
         val loc = runCatching {
             if (presetWord != null) vm.analysis()?.definitionOfWord(name, presetWord)
             else vm.analysis()?.definitionFor(name, sugared.functor.lsp.Position(posLine, posCol))
+        }.getOrNull() ?: runCatching {
+            // 定义没命中时试类型定义：光标在变量/表达式上时，跳到它的类型声明
+            vm.analysis()?.typeDefinitionFor(name, sugared.functor.lsp.Position(posLine, posCol))
         }.getOrNull()
         if (loc != null) {
             val uri = loc.uri
