@@ -34,6 +34,7 @@ object GitManager {
 
     private const val TERMUX_BIN = "/data/data/com.termux/files/usr/bin/git"
     private const val TERMUX_PKG = "/data/data/com.termux/files/usr/bin/pkg"
+    private const val TERMUX_PKG_PROCESS = "com.termux"
     private const val RELAY_DIR = TerminalBridge.RELAY_DIR
     private const val OUT_FILE = TerminalBridge.OUT_FILE
     private const val GIT_MARKER = "$RELAY_DIR/.git_done"
@@ -51,15 +52,18 @@ object GitManager {
     /** RUN_COMMAND 通道是否可用：发 echo 探针，1.5s 内中转文件有内容即通。
      *  Termux 默认不允许外部应用调用（~/.termux/termux.properties 需 allow-external-apps=true），
      *  没开启时服务收 intent 但不执行 —— 探针就是为这个区分。 */
-    suspend fun runCommandReady(ctx: Context): Boolean = withContext(Dispatchers.IO) {
-        if (!isTermuxInstalled(ctx) || !TerminalBridge.hasRunCommandGrant(ctx)) return@withContext false
+    /** 同步探针（TerminalBridge 等非协程场景用） */
+    fun runCommandReadyBlocking(ctx: Context, timeoutMs: Long = 1500): Boolean {
+        if (!isTermuxInstalled(ctx) || !TerminalBridge.hasRunCommandGrant(ctx)) return false
         val relay = File(RELAY_DIR)
         runCatching { relay.mkdirs() }
         File(OUT_FILE).delete()
         File("$RELAY_DIR/.git_done").delete()
-        File("$RELAY_DIR/probe.sh").writeText(
-            "#!/data/data/com.termux/files/usr/bin/sh\necho candyalive > " + OUT_FILE + "\necho done > $RELAY_DIR/.git_done\n",
-        )
+        runCatching {
+            File("$RELAY_DIR/probe.sh").writeText(
+                "#!/data/data/com.termux/files/usr/bin/sh\necho candyalive > " + OUT_FILE + "\necho done > $RELAY_DIR/.git_done\n",
+            )
+        }.getOrElse { return false }
         val intent = android.content.Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh")
@@ -68,21 +72,29 @@ object GitManager {
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
         }
         val sent = runCatching { ctx.startService(intent); true }.getOrElse { false }
-        if (!sent) { dbg("通道探针：startService 失败"); return@withContext false }
-        var waited = 0
-        while (waited < 1500) {
-            delay(50)
-            waited += 50
+        if (!sent) { dbg("通道探针：startService 失败"); return false }
+        var waited = 0L
+        while (waited < timeoutMs) {
+            Thread.sleep(60)
+            waited += 60
             if (File(OUT_FILE).isFile) {
                 val ok = runCatching { File(OUT_FILE).readText() }.getOrDefault("").contains("candyalive")
                 dbg("通道探针：命中（" + waited + "ms）")
                 File(OUT_FILE).delete()
                 File("$RELAY_DIR/.git_done").delete()
-                return@withContext ok
+                return ok
             }
         }
-        dbg("通道探针：超时未响应（Termux 未开启 allow-external-apps？）")
-        false
+        val termuxRunning = runCatching {
+            val am = ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            am.runningAppProcesses?.any { it.processName == TERMUX_PKG_PROCESS } == true
+        }.getOrDefault(false)
+        dbg("通道探针：超时未响应（" + (if (termuxRunning) "Termux 在运行，未开启 allow-external-apps？" else "Termux 未在运行") + "）")
+        return false
+    }
+
+    suspend fun runCommandReady(ctx: Context): Boolean = withContext(Dispatchers.IO) {
+        runCommandReadyBlocking(ctx)
     }
 
     // ---- 安装检测 ----

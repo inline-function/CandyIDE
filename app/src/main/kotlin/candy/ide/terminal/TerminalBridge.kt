@@ -38,7 +38,11 @@ object TerminalBridge {
             return Result(Channel.SHIZUKU, out)
         }
         if (isGitCmd) {
-            // git：交给 Termux（未授权会提示）—— RUN_COMMAND 通道由 GitManager 共享同一中转机制
+            // git 必须走 Termux；先探 RUN_COMMAND 通道，没通直接给开启提示（避免空等轮询像卡住）
+            if (!candy.ide.git.GitManager.runCommandReadyBlocking(ctx)) {
+                return Result(Channel.TERMUX_UNSUITABLE,
+                    "git 需要 Termux 允许外部应用调用（Termux 默认不开）\n去开启：设置 → git 协同 → 一键开启\n或在 Termux 里执行一次：\necho 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings")
+            }
             val via = runGitViaTermux(ctx, trimmed, cwd)
             if (via != null) return via
         }

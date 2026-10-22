@@ -55,7 +55,31 @@ class CandyToolRegistry(private val ctx: Context) {
 
             val cmd = args["command"] as? String
             if (cmd.isNullOrBlank()) return@to "参数 command 必填"
-            // 走 Shizuku（若已授权）；否则提示
+            val trimmed = cmd.trim()
+            val isGit = trimmed.startsWith("git ") || trimmed == "git" || trimmed.startsWith("git\t")
+            if (isGit) {
+                // git 只在 Termux 里（Shizuku 的 shell 用户被 SELinux 挡在 Termux 数据目录外、PATH 也无 git）
+                // 复用终端通道：git 命令自动走 Termux RUN_COMMAND
+                val proj = scope()
+                val cwd = if (proj == AgentScope.PROJECT) currentProjectDir?.let { candy.ide.git.GitManager.realPath(it) } else null
+                val res = candy.ide.terminal.TerminalBridge.exec(ctx, cmd, cwd)
+                return@to when (res.channel) {
+                    candy.ide.terminal.TerminalBridge.Channel.SHIZUKU -> res.output.ifBlank { "（执行完毕，无输出）" }
+                    candy.ide.terminal.TerminalBridge.Channel.TERMUX -> {
+                        // 轮询中转输出（最多 20s）
+                        var waited = 0
+                        var relayOut: String? = null
+                        while (waited < 20000) {
+                            Thread.sleep(400); waited += 400
+                            relayOut = candy.ide.terminal.TerminalBridge.readRelay()
+                            if (relayOut != null) break
+                        }
+                        relayOut?.ifBlank { "（执行完毕，无输出）" } ?: "Termux 命令超时未返回"
+                    }
+                    else -> "git 执行失败：" + res.output
+                }
+            }
+            // 非 git：走 Shizuku（若已授权）；否则提示
             val out = candy.ide.jsapk.ShizukuShell.exec(arrayOf("sh", "-c", cmd))
             out ?: "Shizuku 未连接/未授权，无法执行 shell。请在设置里连接 Shizuku。"
         },
@@ -202,7 +226,7 @@ class CandyToolRegistry(private val ctx: Context) {
         val contentProps = org.json.JSONObject().put("content", org.json.JSONObject().put("type", "string").put("description", "要写入的完整文件内容"))
         val arr = org.json.JSONArray()
         arr.put(fn("read_current_file", "读取编辑器当前打开的文件全文", noProps))
-        arr.put(fn("run_shell", "经 Shizuku 执行 shell 命令并返回输出", cmdProps, listOf("command")))
+        arr.put(fn("run_shell", "执行 shell 命令并返回输出（Shizuku 通道；git 命令自动走 Termux）", cmdProps, listOf("command")))
         arr.put(fn("list_project_files", "列出当前工程的文件清单", noProps))
         arr.put(fn("project_info", "获取当前工程的信息：真实文件路径、工程类型、文件数量、当前打开的文件。开始任何工程操作前先调用", noProps))
         arr.put(fn("workspace_info", "获取工作区（IDE 目录）的真实绝对路径与工程清单。需要在终端里跑命令（git/打包等）时用它拿到真实路径", noProps))
@@ -254,7 +278,7 @@ class CandyToolRegistry(private val ctx: Context) {
 
 可用工具：
 1. read_current_file —— 读取编辑器当前打开的文件全文（无参数，arguments="{}"）
-2. run_shell {"command": "命令字符串"} —— 经 Shizuku 执行 shell 命令并返回输出（需 Shizuku 已授权，失败会如实说）
+2. run_shell {"command": "命令字符串"} —— 执行 shell 命令并返回输出（普通命令经 Shizuku；git 相关命令自动经 Termux 通道执行，因为 Shizuku 的 shell 环境里没有 git）
 3. list_project_files —— 列出当前工程的文件清单（无参数）
 4. list_diagnostics —— 当前编辑器的编译诊断（无参数）
 5. get_project_tree —— 当前工程的目录树（无参数，忽略 build/ 等生成目录）

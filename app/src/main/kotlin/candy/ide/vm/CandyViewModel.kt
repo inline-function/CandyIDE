@@ -277,8 +277,12 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                         candy.ide.git.GitManager.initRepo(getApplication(), dir, "初始化工程 " + name)
                         if (candy.ide.data.Settings.gitUserName.isNotBlank())
                             candy.ide.git.GitManager.configIdentity(getApplication(), dir.fsPath() ?: "", candy.ide.data.Settings.gitUserName, candy.ide.data.Settings.gitUserEmail)
-                        if (candy.ide.data.Settings.gitRemote.isNotBlank())
-                            candy.ide.git.GitManager.setRemote(getApplication(), dir.fsPath() ?: "", candy.ide.data.Settings.gitRemote)
+                        // 远程仓库：新工程先继承设置里的默认地址，写进工程元数据（之后每工程独立）
+                        val remote0 = candy.ide.data.Settings.gitRemote
+                        if (remote0.isNotBlank()) {
+                            candy.ide.data.ProjectStore.writeRemote(dir, remote0)
+                            candy.ide.git.GitManager.setRemote(getApplication(), dir.fsPath() ?: "", remote0)
+                        }
                     } catch (e: Exception) { }
                 }
                 main.post { refreshProjects(); openProject(dir) }
@@ -321,6 +325,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             ?: dir.walk().filter { it.isFile() && it.name.endsWith(".md") }.minByOrNull { it.name }
         Snapshot.withMutableSnapshot {
             currentProject.value = dir
+            projectRemote.value = candy.ide.data.ProjectStore.remoteOf(dir)
             openFiles.clear()
             activeIndex.intValue = 0
             if (first != null) {
@@ -966,6 +971,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         // 首次（或被清空后）从 assets 释放；已存在则直接打开
         if (!dir.isDirectory() || dir.find(".candy_builtin")?.isFile() != true || dir.listFiles()?.isEmpty() != false) {
             runCatching {
+                if (!dir.isDirectory()) dir.mkdirs()
                 val files = ctx.assets.list("builtin/" + assetDir) ?: emptyArray()
                 files.forEach { fn ->
                     ctx.assets.open("builtin/" + assetDir + "/" + fn).use { input ->
@@ -1279,6 +1285,31 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     /** 「需要开启 Termux 外部调用」对话框 */
     val termuxSetupNeeded = mutableStateOf(false)
 
+    /** 编辑页 git 面板（右侧滑出） */
+    val gitDrawerOpen = mutableStateOf(false)
+    /** 当前工程的远程仓库地址（每工程独立，写进 candy.project） */
+    val projectRemote = mutableStateOf("")
+
+    /** 保存当前工程的远程仓库地址：写工程元数据 + setRemote */
+    fun saveProjectRemote(ctx: android.content.Context, remote: String) {
+        val proj = currentProject.value ?: return
+        projectRemote.value = remote
+        viewModelScope.launch {
+            candy.ide.data.ProjectStore.writeRemote(proj, remote)
+            val path = candy.ide.git.GitManager.realPath(proj)
+            if (!path.isNullOrBlank() && remote.isNotBlank()) {
+                candy.ide.git.GitManager.setRemote(ctx, path, remote)
+                candy.ide.data.Settings.gitRemote = remote
+                candy.ide.data.Settings.persist(ctx)
+            }
+        }
+    }
+
+    /** 打开工程时读取该工程的远程仓库地址（每工程独立） */
+    fun loadProjectRemote() {
+        projectRemote.value = candy.ide.data.ProjectStore.remoteOf(currentProject.value)
+    }
+
     /** 日志按钮长按：进 git 页（通道没通引导开启、没装 git 引导安装） */
     fun openGitPage(ctx: android.content.Context) {
         viewModelScope.launch {
@@ -1288,7 +1319,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 !runCmdReady.value -> termuxSetupNeeded.value = true
                 candy.ide.git.GitManager.isGitReady(ctx) -> {
                     gitReady.value = true
-                    screen.value = Screen.Git
+                    gitDrawerOpen.value = true
                     checkCloudUpdates(ctx)
                 }
                 else -> gitInstallNeeded.value = true

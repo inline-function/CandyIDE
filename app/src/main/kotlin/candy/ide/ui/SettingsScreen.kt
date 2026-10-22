@@ -285,6 +285,34 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
+            // Termux RUN_COMMAND 授权（Shizuku 分类下，git/终端能力都依赖它）
+            item {
+                Surface(color = CandySurface) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Termux 授权", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text(
+                                if (!candy.ide.terminal.TerminalBridge.isTermuxInstalled(ctx))
+                                    "Termux 未安装（设置 → 伴生软件 下载）"
+                                else if (candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx))
+                                    "已授权 RUN_COMMAND ✓"
+                                else "未授权 —— git 与终端的 Termux 通道需要它",
+                                color = CandyTextDim, style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        if (candy.ide.terminal.TerminalBridge.isTermuxInstalled(ctx) &&
+                            !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx)
+                        ) {
+                            TextButton(onClick = {
+                                runCmdPermLauncher.launch(arrayOf("com.termux.permission.RUN_COMMAND"))
+                            }) { Text("请求授权") }
+                        }
+                    }
+                }
+            }
             // 外部文件访问权限：跳系统「所有文件访问」设置页，状态即时回读
             item {
                 var extGranted by remember(resumeTick) {
@@ -618,8 +646,27 @@ fun SettingsScreen(vm: CandyViewModel) {
             }
             item { SectionTitle("关于") }
             item { SettingsRow("CandyIDE", "v" + versionName) }
-            item { SettingsRow("语言引擎", "Sublimation（编译 → JS → WebView）") }
-            item { SettingsRow("开源组件", "SoraEditor · commonmark-java · ColorPicker · Shizuku API") }
+            item { SettingsRow("开源组件", "SoraEditor · commonmark-java · ColorPicker · Shizuku API（点击下方各条目进入项目地址）") }
+            item {
+                Surface(color = CandySurface, onClick = {
+                    runCatching {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://github.com/inline-function/CandyIDE"),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ctx.startActivity(intent)
+                    }.onFailure { Toast.makeText(ctx, "没有可打开链接的应用", Toast.LENGTH_SHORT).show() }
+                }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("项目地址 · CandyIDE（本 IDE）", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("github.com/inline-function/CandyIDE", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandyTextDim)
+                    }
+                }
+            }
             item {
                 Surface(color = CandySurface, onClick = {
                     runCatching {
@@ -656,26 +703,21 @@ fun SettingsScreen(vm: CandyViewModel) {
             item {
                 Surface(color = CandySurface) {
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                        Text("个人信息", color = CandyText, fontWeight = FontWeight.Bold)
+                        Text("个人信息（提交署名）", color = CandyText, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.size(2.dp))
+                        Text("远程仓库地址在编辑页 git 面板里，每个工程独立保存", color = CandyTextDim, fontSize = 11.sp)
                         Spacer(Modifier.size(8.dp))
-                        TextField(
+                        OutlinedTextField(
                             value = Settings.gitUserName,
                             onValueChange = { Settings.gitUserName = it; Settings.persist(ctx) },
-                            label = { Text("用户名") }, singleLine = true,
+                            label = { Text("用户名", color = CandyTextDim) }, singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(Modifier.size(8.dp))
-                        TextField(
+                        OutlinedTextField(
                             value = Settings.gitUserEmail,
                             onValueChange = { Settings.gitUserEmail = it; Settings.persist(ctx) },
-                            label = { Text("邮箱") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.size(8.dp))
-                        TextField(
-                            value = Settings.gitRemote,
-                            onValueChange = { Settings.gitRemote = it; Settings.persist(ctx) },
-                            label = { Text("远程仓库地址（https / ssh）") }, singleLine = true,
+                            label = { Text("邮箱", color = CandyTextDim) }, singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -710,9 +752,8 @@ fun SettingsScreen(vm: CandyViewModel) {
                         vm.gitReady.value -> Toast.makeText(ctx, "您已安装git", Toast.LENGTH_SHORT).show()
                         !vm.termuxInstalled.value -> pendingTermuxForGit = true
                         !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx) -> {
-                            // 没授权先请求（弹系统授权框），授权后状态自动刷新
-                            runCmdPermLauncher.launch(arrayOf("com.termux.permission.RUN_COMMAND"))
-                            Toast.makeText(ctx, "需要授权 Termux 执行命令，授权后重试", Toast.LENGTH_LONG).show()
+                            // 没授权：提示去「Shizuku 权限」分类请求 Termux 授权
+                            Toast.makeText(ctx, "请先请求 Termux 授权（设置 → Shizuku 权限 → Termux 授权），授权后再装 git", Toast.LENGTH_LONG).show()
                         }
                         !vm.runCmdReady.value -> vm.termuxSetupNeeded.value = true
                         else -> pendingInstallGit = true

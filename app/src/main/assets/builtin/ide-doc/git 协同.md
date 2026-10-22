@@ -28,13 +28,17 @@ termux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.prop
 稍后再装也可以：设置 → git 协同 → 安装 git。
 
 - 没装 Termux：先提示装 Termux（附下载链接），装好回来自动继续
-- 已装 Termux：直接问是否安装 git
+- Termux 未授权：提示先去 设置 → Shizuku 权限 → Termux 授权 请求授权
+- 已授权：直接问是否安装 git
 - 已装 git：再点提示“您已安装git”
 
 创建工程时会自动初始化 git 仓库（若协同应用就绪）。
 
-## git 页面（编辑页长按第 4 按钮）
+## git 面板（编辑页长按「输出/日志/诊断」按钮，右侧滑出）
 
+- **远程仓库（本工程）**
+  - 每个工程独立保存自己的远程仓库地址（https / ssh）
+  - 新建工程时继承设置里的默认地址，之后可单独改
 - **推送 (Commit)**
   - 短按：保存到本地，弹对话框填存档名（默认“第 n 次推送”）
   - 长按：保存并推送到云端（push）
@@ -47,7 +51,7 @@ termux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.prop
 
 ## IDE 设置 → git 协同
 
-- **个人信息**：用户名 / 邮箱 / 远程仓库地址（https 或 ssh）
+- **个人信息**：提交署名用的用户名 / 邮箱（远程仓库地址在编辑页 git 面板里，每工程独立）
 - **修改文件自动提交**：保存、删除、新建文件时自动提交，提交名形如“修改 hello.subl 文件”“删除 src 目录”
 - **自动同步云端**：进入工程自动拉取；开启自动提交时一并推送（手动推送不受影响）
 

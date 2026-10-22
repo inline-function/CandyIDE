@@ -119,7 +119,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
 
     // ---- 协同应用检测（首次使用）----
     var companionDismissed by remember { mutableStateOf(Settings.companionDialogShown) }
-    var gitInitDeferred by remember { mutableStateOf(false) }
+    var gitInitDeferred by remember { mutableStateOf(candy.ide.data.Settings.gitInitDeferred) }
 
     // 进出活动时刷新协同应用安装状态（对话框里的叉/勾跟着更新）
     val lifecycleOwner2 = LocalLifecycleOwner.current
@@ -169,7 +169,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
                                 Column(Modifier.weight(1f)) {
                                     Text("开启 Termux 外部调用", color = CandyText, fontSize = 13.sp)
                                     Text(
-                                        "Termux 默认不允许外部应用执行命令。命令已复制，点击跳转 Termux 粘贴执行一次。",
+                                        "Termux 默认不允许外部应用执行命令。命令已复制，点击跳转 Termux 粘贴执行一次，之后再回车一次即可。",
                                         color = CandyTextDim, fontSize = 10.sp,
                                     )
                                 }
@@ -193,7 +193,8 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
     // git 初始化引导：Termux 已装但 git 未装（首进工程 / 检测刷新发现刚装好 Termux）
     LaunchedEffect(vm.termuxInstalled.value, vm.gitReady.value) {
         if (workspaceReady && vm.termuxInstalled.value && !vm.gitReady.value &&
-            !gitInitDeferred && !vm.gitInitDialog.value && !vm.gitInstallNeeded.value
+            !gitInitDeferred && !candy.ide.data.Settings.gitInitDeferred &&
+            !vm.gitInitDialog.value && !vm.gitInstallNeeded.value
         ) {
             vm.gitInitDialog.value = true
         }
@@ -204,7 +205,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
             onDismissRequest = { vm.termuxSetupNeeded.value = false },
             title = { Text("需要开启 Termux 外部调用") },
             text = {
-                Text("Termux 默认不允许其它应用执行命令。\n点击「去开启」会复制命令并跳转 Termux，粘贴执行一次（系统询问存储权限时同意）。\n\ntermux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings")
+                Text("Termux 默认不允许其它应用执行命令，且需要它在运行。\n若已执行过开启命令，可能是 Termux 没在运行——点击「去开启」打开 Termux 一次再回来。\n首次开启：粘贴执行命令（系统询问存储权限时同意），之后再回车一次即可。\n\ntermux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings")
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -235,7 +236,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
     }
     if (vm.gitInitDialog.value) {
         AlertDialog(
-            onDismissRequest = { vm.gitInitDialog.value = false; gitInitDeferred = true },
+            onDismissRequest = { vm.gitInitDialog.value = false; gitInitDeferred = true; candy.ide.data.Settings.gitInitDeferred = true; candy.ide.data.Settings.persist(ctx) },
             title = { Text("尚未初始化 git") },
             text = { Text("检测到 Termux 但还没有安装 git，是否初始化 git？") },
             confirmButton = {
@@ -248,6 +249,8 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
                 TextButton(onClick = {
                     vm.gitInitDialog.value = false
                     gitInitDeferred = true
+                    candy.ide.data.Settings.gitInitDeferred = true
+                    candy.ide.data.Settings.persist(ctx)
                 }) { Text("稍后") }
             },
         )

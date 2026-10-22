@@ -39,6 +39,7 @@ var agentStream by mutableStateOf(true)   // 流式输出（SSE）
     var gitRemote by mutableStateOf("")      // 远程仓库地址（https 或 ssh）
     var gitAutoCommit by mutableStateOf(true)   // 修改文件自动提交（“修改 xx 文件”）
     var gitAutoSync by mutableStateOf(false)    // 自动同步云端：进工程拉取 + 自动提交时推送
+var gitInitDeferred by mutableStateOf(false)  // git 初始化引导：点过一次就不再弹（持久化）
     var companionDialogShown by mutableStateOf(false)   // 协同应用对话框已经显示过（点过稍后）
 
     /** 首次拿到 Context 后加载；同时把当前配色方案从磁盘恢复 */
@@ -70,6 +71,7 @@ var agentStream by mutableStateOf(true)   // 流式输出（SSE）
     companionDialogShown = props.getProperty("companionDialogShown") == "true"
     gitAutoCommit = props.getProperty("gitAutoCommit") != "false"
     gitAutoSync = props.getProperty("gitAutoSync") == "true"
+    gitInitDeferred = props.getProperty("gitInitDeferred") == "true"
             }
         }
         Schemes.current = Schemes.byId(ctx, schemeId)
@@ -98,6 +100,7 @@ var agentStream by mutableStateOf(true)   // 流式输出（SSE）
         setProperty("gitRemote", gitRemote)
         setProperty("gitAutoCommit", gitAutoCommit.toString())
         setProperty("gitAutoSync", gitAutoSync.toString())
+    setProperty("gitInitDeferred", gitInitDeferred.toString())
         setProperty("companionDialogShown", companionDialogShown.toString())
             }
             props.store(f.outputStream(), "CandyIDE settings")

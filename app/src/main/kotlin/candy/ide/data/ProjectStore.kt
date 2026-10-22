@@ -54,9 +54,29 @@ object ProjectStore {
         return root.find(name) ?: root.createDirectory(name)
     }
 
-    /** 写工程类型标记 */
+    /** 写工程类型标记（保留已有的 remote 行） */
     fun writeType(dir: CandyPath, type: String) = runCatching {
-        dir.child(META).writeText("type=" + type)
+        dir.child(META).writeText("type=" + type + remoteMetaLine(dir))
+    }
+
+    private fun remoteMetaLine(dir: CandyPath): String {
+        val r = remoteOf(dir)
+        return if (r.isBlank()) "" else "\nremote=" + r
+    }
+
+    /** 写工程自己的远程仓库地址（每个工程独立保存） */
+    fun writeRemote(dir: CandyPath, remote: String) = runCatching {
+        val type = typeOf(dir)
+        dir.child(META).writeText("type=" + type + if (remote.isBlank()) "" else "\nremote=" + remote)
+    }
+
+    /** 读工程的远程仓库地址（无则空串） */
+    fun remoteOf(dir: CandyPath?): String {
+        if (dir == null) return ""
+        val meta = dir.find(META)
+        if (meta?.isFile() != true) return ""
+        val raw = runCatching { meta.readText() }.getOrNull() ?: ""
+        return raw.substringAfter("remote=", "").trim()
     }
 
     /** 内置工程根目录（语言文档 / IDE 文档）：只读，不可编辑（仍在私有目录） */
@@ -75,7 +95,7 @@ object ProjectStore {
         val meta = dir.find(META)
         if (meta?.isFile() == true) {
             val raw = runCatching { meta.readText() }.getOrNull() ?: ""
-            val t = raw.substringAfter("type=", "").trim()
+            val t = raw.substringAfter("type=", "").substringBefore("\n").trim()
             if (t == TYPE_JS || t == TYPE_SCRIPT || t == TYPE_JSAPK || t == TYPE_MD) return t
         }
         val hasSubl = dir.walk().any { it.isFile() && it.name.endsWith(".subl") }

@@ -820,6 +820,30 @@ fun EditorScreen(vm: CandyViewModel) {
                     drawerClose = { scope.launch { drawerState.close() } },
                 )
             }
+            // git 面板抽屉：自绘遮罩 + 从右滑出（与日志抽屉同款）
+            AnimatedVisibility(
+                visible = vm.gitDrawerOpen.value,
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(180)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.36f))
+                        .clickable { vm.gitDrawerOpen.value = false },
+                )
+            }
+            AnimatedVisibility(
+                visible = vm.gitDrawerOpen.value,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                enter = slideInHorizontally(tween(220)) { fullWidth -> fullWidth },
+                exit = slideOutHorizontally(tween(220)) { fullWidth -> fullWidth }
+            ) {
+                val topPad = with(androidx.compose.ui.platform.LocalDensity.current) { topBarHeightPx.toDp() }
+                Surface(color = CandyBg, modifier = Modifier.fillMaxHeight().fillMaxWidth(0.85f)) {
+                    GitPanel(vm)
+                }
+            }
         // AI agent 悬浮球（设置里 agentEnabled=true 才出现；Box 内最后声明 → 最上层）
         AgentFloatingBall(vm)
                     }

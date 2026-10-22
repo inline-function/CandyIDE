@@ -18,6 +18,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -39,10 +40,11 @@ import candy.ide.ui.theme.CandyText
 import candy.ide.ui.theme.CandyTextDim
 import candy.ide.vm.CandyViewModel
 
-/** git 页：推送（短按本地提交 / 长按推送云端）与丢弃（短按还原 / 长按版本回退） */
+/** git 面板：推送（短按本地提交 / 长按推送云端）与丢弃（短按还原 / 长按版本回退）。
+ *  编辑页右侧抽屉与全屏页共用本面板。 */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun GitScreen(vm: CandyViewModel) {
+fun GitPanel(vm: CandyViewModel) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { vm.refreshCommitCount(ctx) }
     var commitName by remember { mutableStateOf("") }
@@ -53,12 +55,13 @@ fun GitScreen(vm: CandyViewModel) {
     val gitResult = vm.gitResult.value
     val busy = vm.gitBusy.value
     val behind = vm.cloudBehind.intValue
+    var remoteText by remember { mutableStateOf(vm.projectRemote.value) }
+    LaunchedEffect(vm.projectRemote.value) { remoteText = vm.projectRemote.value }
 
-    androidx.activity.compose.BackHandler { vm.screen.value = Screen.Editor }
-    Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -68,6 +71,31 @@ fun GitScreen(vm: CandyViewModel) {
                         CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
                         Spacer(Modifier.size(6.dp))
                         Text(vm.gitMsg.value.ifBlank { "处理中…" }, color = CandyTextDim, fontSize = 12.sp)
+                    }
+                }
+            }
+            // 远程仓库：每工程独立保存
+            item {
+                Surface(color = CandySurface, shape = RoundedCornerShape(10.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text("远程仓库（本工程）", color = CandyText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.size(4.dp))
+                        Text("每个工程单独保存自己的远程地址（https / ssh）", color = CandyTextDim, fontSize = 11.sp)
+                        Spacer(Modifier.size(6.dp))
+                        OutlinedTextField(
+                            value = remoteText,
+                            onValueChange = { remoteText = it },
+                            label = { Text("https / ssh 地址", color = CandyTextDim) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = {
+                                vm.saveProjectRemote(ctx, remoteText.trim())
+                                vm.toast.value = "已保存本工程的远程仓库地址"
+                            }) { Text("保存地址") }
+                        }
                     }
                 }
             }
@@ -246,3 +274,9 @@ fun GitScreen(vm: CandyViewModel) {
     }
 }
 
+
+/** 全屏 git 页（保留路由兼容；主入口是编辑页 git 抽屉） */
+@Composable
+fun GitScreen(vm: CandyViewModel) {
+    GitPanel(vm)
+}

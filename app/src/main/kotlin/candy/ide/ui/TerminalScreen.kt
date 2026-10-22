@@ -104,9 +104,18 @@ fun TerminalScreen(vm: CandyViewModel) {
         if (proj != null) lines.add(TermLine("当前工程：" + proj, TermLine.Kind.SYS))
         lines.add(TermLine("目录：" + cwd + "（cd 切换）", TermLine.Kind.SYS))
         lines.add(TermLine("敲命令试试：git status / pkg install git / ls", TermLine.Kind.SYS))
+        // Termux 已装但 RUN_COMMAND 通道未通：引导开启（Termux 默认不允许外部应用调用）
+        if (TerminalBridge.isTermuxInstalled(ctx) &&
+            !candy.ide.git.GitManager.runCommandReady(ctx)
+        ) {
+            vm.termuxSetupNeeded.value = true
+        }
     }
 
-    BackHandler { vm.screen.value = Screen.Editor }
+    // 从主页终端按钮进来时 currentProject 为空 → 回主页；否则回编辑页
+    BackHandler {
+        vm.screen.value = if (vm.currentProject.value != null) Screen.Editor else Screen.Projects
+    }
 
     Scaffold(
         containerColor = TermBg,
@@ -115,7 +124,9 @@ fun TerminalScreen(vm: CandyViewModel) {
                 modifier = Modifier.fillMaxWidth().background(TermBg).padding(8.dp).statusBarsPadding(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { vm.screen.value = Screen.Editor }) {
+                IconButton(onClick = {
+        vm.screen.value = if (vm.currentProject.value != null) Screen.Editor else Screen.Projects
+    }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = TermFg)
                 }
                 Icon(Icons.Default.Terminal, contentDescription = null, tint = TermAccent, modifier = Modifier.size(20.dp))

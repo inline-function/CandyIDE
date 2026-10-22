@@ -1,0 +1,15 @@
+feat: git 面板右侧抽屉 + 每工程独立远程仓库；修复终端/git 卡住与误导航；文档同步
+
+- 编辑页长按「输出/日志/诊断」从右侧滑出 git 面板（与日志抽屉同款），取代独立 git 页
+- git 面板内置远程仓库地址：每个工程独立保存（写 candy.project），新建工程时继承设置默认值
+- CandyPath 新增 mkdirs；内置工程释放前建目录（修复语言文档/IDE 文档空内容）
+- 终端页进入时探活 RUN_COMMAND：Termux 已装未通则弹「需要开启 Termux 外部调用」（文案补「之后再回车一次」）
+- 终端 git 命令先探通道再提交，未通直接报开启提示（不再像卡住一样空等 15s）
+- 终端页返回/返回按钮按来源回主页或编辑页（修复从终端出来是空白编辑页）
+- run_shell 的 git 命令改走终端通道（Shizuku 的 shell 环境无 git），工具描述同步
+- 设置 Shizuku 分类下新增 Termux 授权行；安装 git 前置检查并提示「请先请求 Termux 授权」
+- git 协同分类编辑框统一为 OutlinedTextField，远程仓库地址移入工程 git 面板
+- git 初始化引导「稍后」持久化（退出重进不再弹）
+- 探针区分「Termux 未运行」与「未开启 allow-external-apps」并在日志标注
+- 设置：删除语言引擎条目；开源组件与项目地址拆为可点子条目（CandyIDE/Sublimation/SoraEditor/commonmark/ColorPicker/Shizuku）
+- IDE 文档审查更新：工程类型新名称、终端入口为主页按钮、git 面板措辞、AI 助手访问权与 token 条
