@@ -268,7 +268,7 @@ private fun NewProjectDialog(onCreate: (String, String) -> Unit, onDismiss: () -
                     when (typeSel) {
                         0 -> "将Subl编译为JS代码，可打包为控制台APK"
                         1 -> "通过解释器直接执行Subs文件，可打包为控制台APK"
-                        2 -> "使用Subl借助安卓基本库开发安卓APK"
+                        2 -> "@composable 视图 + @android 内建，编译为原生 APK；需导入 LiteASDK 工具链"
                         else -> "用于存放文档的工程，可将MD文档包装为只读文档APK"
                     },
                     color = CandyTextDim,

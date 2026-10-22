@@ -1,0 +1,113 @@
+// android.subs —— @android 内建函数处理器（android doc/安卓标准库.md）
+//
+// 职责：
+//   1. @android 标注安卓内建（log/toast/layout/7 个生命周期/androidRecompose），
+//      函数无体、由编译器内建 JS 桥接（JsCodeGen __dshAndroid）。
+//   2. 态度校验：白名单 / @impure / 无体（不改 AST → 天然幂等）。
+//   3. V2 编译后阶段（@postcompile build）：接收 -A 传入的安卓工程路径与 JS 产物，
+//      把 JS 装进 android-app 的 assets 并驱动 gradlew 构建 APK。
+// @postcompile build
+
+fun checkFuns(xs: List[Str]): Null =
+    when (xs) {
+        Nil => null
+        is Cons(f, rest) => { checkOne(f); checkFuns(rest) }
+        else => null
+    }
+
+fun checkOne(fn: Str): Null {
+    if (!funHasAnnotation(fn, "android")) null else {
+        if (startsWith(fn, "recomposion$")) null
+        else {
+            var anns: List[Str] = funAnnotations(fn);
+            checkWhitelist(fn);
+            checkImpure(fn, anns);
+            checkNoBody(fn)
+        }
+    }
+}
+
+fun checkWhitelist(fn: Str): Null {
+    if (startsWith(fn, "recomposion$")) null
+    else if (isAndroidBuiltin(fn)) null
+    else processorError("@android 函数 " + fn + " 不是编译器支持的安卓内建。内建含 log/toast/layout/7 个生命周期/androidRecompose/意图 6 个（openUrl,shareText,dial,sms,openSettings,launchApp）/平台能力 11 个（clipboardSet/Get,storagePut/Get,keepScreenOn,vibrate,screenW/H/Density,installedApps,pickFile）")
+}
+
+fun checkImpure(fn: Str, anns: List[Str]): Null {
+    if (containsAnno(anns, "impure")) null
+    else processorWarn("@android 函数 " + fn + " 缺 @impure：桥接原生有副作用，缺省为不纯")
+}
+
+fun checkNoBody(fn: Str): Null {
+    if (funHasBody(fn)) processorError("@android 函数 " + fn + " 不应有函数体：内建实现由编译器提供")
+    else null
+}
+
+fun containsAnno(xs: List[Str], a: Str): Bool =
+    when (xs) {
+        Nil => false
+        is Cons(h, rest) => if (startsWith(h, a)) true else containsAnno(rest, a)
+        else => false
+    }
+
+fun isAndroidBuiltin(fn: Str): Bool =
+    when (fn) {
+        "log" => true
+        "toast" => true
+        "layout" => true
+        "onCreate" => true
+        "onStart" => true
+        "onResume" => true
+        "onPause" => true
+        "onStop" => true
+        "onDestroy" => true
+        "onRestart" => true
+        "androidRecompose" => true
+        // 意图（intent.subl）
+        "openUrl" => true
+        "shareText" => true
+        "dial" => true
+        "sms" => true
+        "openSettings" => true
+        "launchApp" => true
+        // 平台能力（platform.subl）
+        "clipboardSet" => true
+        "clipboardGet" => true
+        "storagePut" => true
+        "storageGet" => true
+        "keepScreenOn" => true
+        "vibrate" => true
+        "screenWidth" => true
+        "screenHeight" => true
+        "screenDensity" => true
+        "installedApps" => true
+        "pickFile" => true
+        else => false
+    }
+
+// ---------- V2 编译后阶段：构建 APK ----------
+// 期望编译参数（-A key=value）：appDir=安卓工程目录（含 gradlew/app/）；
+// jsPath=JS 产物路径；outDir=APK 输出目录。缺 appDir/jsPath 时跳过。
+
+fun build(): Null {
+    var appDir: Str = optionOr("appDir", "")
+    var jsPath: Str = optionOr("jsPath", "")
+    var sdkDir: Str = optionOr("sdkDir", "")
+    var outDir: Str = optionOr("outDir", appDir + "\\build\\apk")
+    if (appDir == "") processorInfo("apk 构建：未给 appDir，跳过")
+    else if (jsPath == "") processorInfo("apk 构建：未给 jsPath，跳过")
+    else {
+        processorInfo("安卓 APK 构建开始：" + appDir)
+        var res: Str = buildAndroidApk(appDir, jsPath, outDir, sdkDir)
+        reportApkResult(res)
+        null
+    }
+}
+
+fun reportApkResult(res: Str): Null {
+    if (startsWith(res, "ok")) processorInfo("APK 就绪：" + res)
+    else processorError("APK 构建失败：" + res)
+    null
+}
+
+checkFuns(funNames(0))

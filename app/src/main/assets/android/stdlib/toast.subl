@@ -1,0 +1,4 @@
+// android/toast.subl —— 提示（android doc/安卓标准库.md §toast函数）
+// toast 弹出一个提示。参数：msg（Str 提示内容）、long（Bool 是否长时显示，默认 false）。
+
+@android @impure fun toast(msg: Str, long: Bool = false): Null

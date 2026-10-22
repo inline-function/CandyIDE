@@ -1,0 +1,13 @@
+// android/Slider.subl —— 滑块（MD Slider）
+//
+// value/from/to 为 Rat（原生 Float）。拖动时 onChange 回调当前值。
+
+@view struct Slider(
+    value: Rat = 0.0,
+    from: Rat = 0.0,
+    to: Rat = 1.0,
+    enabled: Bool = true,
+    onChange: (Rat) => Null = fun(v: Rat): Null { null },
+    modifier: Modifier = Plain(),
+    body: () => Null = fun(): Null { null }
+)

@@ -1,0 +1,5 @@
+// android/ui/Alignment.subl —— 对齐（android doc/安卓标准库.md §布局）
+//
+// contentAlignment 的取值：enum 构造子（编译期 类型安全），由 KT 端解析为原生 Gravity。
+
+enum Alignment { Center(), TopStart(), BottomEnd(), CenterStart(), CenterEnd(), Top(), Bottom() }

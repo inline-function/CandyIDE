@@ -32,6 +32,9 @@ import sugared.functor.lsp.LspAnalysis
 import sugared.functor.lsp.Position
 import sugared.functor.lsp.Range
 import sugared.functor.lsp.TextEdit
+import sugared.functor.annotationproc.ProcessorPipeline
+import sugared.functor.annotationproc.ScriptProcessor
+import sugared.functor.checker.MultiModule
 import candy.ide.fs.CandyFs
 import candy.ide.fs.CandyPath
 import java.io.File
@@ -231,6 +234,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         io.execute {
             try {
                 Engine.bootstrap(getApplication())
+                androidBootstrap()
                 Settings.attach(getApplication())
                 candy.ide.git.GitManager.appCtx = getApplication()
                 schemeVersion.intValue++
@@ -253,20 +257,10 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             ProjectStore.create(getApplication(), name)?.let { dir ->
                 ProjectStore.writeType(dir, type)
                 when (type) {
-                    ProjectStore.TYPE_JSAPK -> {
-                        dir.child("hello.subl").writeText(DEMO_SOURCE)
-                        dir.child("jsapk.json").writeText(
-                            buildString {
-                                append("{\n")
-                                append("  \"entry\": \"hello.subl\",\n")
-                                append("  \"package\": \"candy.jsapk.runtime\",\n")
-                                append("  \"note\": \"v0 SDK 固定包名：装新应用会覆盖旧的\"\n")
-                                append("}\n")
-                            }
-                        )
-                    }
+                    // 安卓工程（SfA 原生链）：@android 内建 + @composable 视图树样板
+                    ProjectStore.TYPE_JSAPK -> dir.child("main.subl").writeText(ANDROID_DEMO_SOURCE)
                     ProjectStore.TYPE_SCRIPT -> dir.child("hello.subs").writeText(SCRIPT_DEMO_SOURCE)
-                    // md 文档工程：只有 md 文件，不含可执行代码
+                                    // md 文档工程：只有 md 文件，不含可执行代码
                     ProjectStore.TYPE_MD -> {
                         dir.child("index.md").writeText("# " + name + "\n\n在这里写文档。左侧文件树可继续新增 .md。\n\n- 支持：标题 / 列表 / 代码块 / 引用 / 链接\n- 长按顶栏运行按钮可打包成文档 APK\n")
                     }
@@ -1108,7 +1102,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 if (project != null && ProjectStore.typeOf(project) == ProjectStore.TYPE_MD)
                     throw RuntimeException("md 文档工程不可运行：长按「运行」打包成文档 APK")
                 val type = if (project != null) ProjectStore.typeOf(project) else ProjectStore.TYPE_JS
-                if (type == ProjectStore.TYPE_JS || type == ProjectStore.TYPE_JSAPK) {
+                if (type == ProjectStore.TYPE_JS || (type == ProjectStore.TYPE_JSAPK && project?.find("jsapk.json")?.isFile() == true)) {
                     mdLog("**[运行]** `" + file.name + "` 编译 → JS → WebView")
                     Engine.run(getApplication(), file,
                         onLine = { line -> main.post { outputLines.add(line) } },
@@ -1122,6 +1116,10 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                         onCompiled = { ms -> mdLog("**[编译完成]** 用时 " + fmtElapsed(ms)) },
                         onInput = { readlnDialog() },
                     )
+                } else if (type == ProjectStore.TYPE_JSAPK) {
+                    mdLog("**[运行]** `" + file.name + "` 安卓工程：注解处理器 → 编译 → JS（原生 APK 打包链路施工中）")
+                    compileAndroidJs(file)
+                    mdLogUser("**[安卓工程]** 编译通过")
                 } else {
                     mdLog("**[运行]** `" + file.name + "` 脚本直连解释器")
                     Engine.runScript(getApplication(), file,
@@ -1135,8 +1133,17 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             } catch (t: Throwable) {
-                mdLog("**[错误]** " + (t.message?.replace("`", "'") ?: t.javaClass.simpleName).substringBefore("\n").take(400))
+                val msg = t.message?.replace("`", "'") ?: t.javaClass.simpleName
+                mdLog("**[错误]** " + msg.substringBefore("\n").take(400))
+                // 安卓工程编译报告动辄上百行：分段落进日志，方便定位
+                if (msg.contains("\n")) {
+                    // 先落错误/警告行（定位用），再落前 40 行上下文
+                    msg.split("\n").filter { it.contains("[错误]") || it.contains("[警告]") || it.contains("E-") }.take(40).forEach { line -> mdLog("    " + line.take(400)) }
+                    mdLog("    ── 上下文前 40 行 ──")
+                    msg.split("\n").drop(1).filter { it.isNotBlank() }.take(40).forEach { line -> mdLog("    " + line.take(300)) }
+                } else {
                     mdLog("**[提示]** 完整诊断请看「诊断」页签")
+                }
                 main.post {
                     runFailed.value = true
                     running.value = false
@@ -1208,7 +1215,19 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_MD) { buildMdApkProject(dir); return }
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_SCRIPT) { buildScriptApkProject(dir); return }
         if (dir.find("jsapk.json")?.isFile() == true) { buildApkIn(dir); return }
-        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) { buildApkIn(dir); return }
+        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) {
+            // 新安卓工程（无 jsapk.json）：SfA 原生链 —— 先编译（处理器 + 检查），再谈打包
+            runCatching {
+                val entry = dir.walk().firstOrNull { it.isFile() && (it.name == "main.subl" || it.name.endsWith(".subl")) }
+                    ?: throw RuntimeException("工程里没有 .subl 入口")
+                compileAndroidJs(entry)
+            }.onSuccess { js ->
+                mdLogUser("**[安卓工程]** 编译通过，产物 JS `" + js.length + "` 字符；端上 APK 打包链路施工中")
+            }.onFailure { e ->
+                mdLogUser("**[安卓工程编译失败]** " + ((e as? RuntimeException)?.message ?: e.message ?: e.javaClass.simpleName))
+            }
+            return
+        }
         buildApkIn(dir, JsApkConfig(
             pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
             label = dir.name,
@@ -1790,6 +1809,83 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ───────── 原生安卓工程（SfA 模式）：注解处理器 + 安卓标准库 + core ─────────
+    /** assets/android 物化版本：处理器/安卓标准库更新后递增 */
+    private val androidAssetVersion = 2
+
+    /** 释放 assets/android（处理器 .subs + 安卓标准库 .subl）到 files/candy/android */
+    fun androidBootstrap(): Boolean = runCatching {
+        val ctx = getApplication<Application>()
+        val root = Engine.root(ctx)
+        val dir = java.io.File(root, "android")
+        val marker = java.io.File(root, "android.version")
+        val need = !marker.exists() || marker.readText().trim() != androidAssetVersion.toString()
+        if (need) {
+            dir.deleteRecursively(); dir.mkdirs()
+            fun copyAssetTree(assetPath: String, target: java.io.File) {
+                val children = ctx.assets.list(assetPath)
+                if (children == null || children.isEmpty()) {
+                    target.parentFile?.mkdirs()
+                    ctx.assets.open(assetPath).use { ins -> target.outputStream().use { out -> ins.copyTo(out) } }
+                } else {
+                    target.mkdirs()
+                    for (c in children) copyAssetTree("$assetPath/$c", java.io.File(target, c))
+                }
+            }
+            copyAssetTree("android", dir)
+            marker.writeText(androidAssetVersion.toString())
+        }
+        java.io.File(dir, "procs/android.subs").exists()
+    }.getOrDefault(false)
+
+    /** 安卓工程编译：处理器变换 + 全量检查 → JS；失败抛带报告的异常 */
+    fun compileAndroidJs(script: CandyPath): String {
+        val ctx = getApplication<Application>()
+        val project = script.parent ?: script
+        val src = script.readText()
+        // 编译根 = core + 安卓标准库（平铺根模块，与 SfA app/ 同构）+ 工程源
+        val compileRoot = java.io.File(ctx.cacheDir, "candy/androidRoot")
+        compileRoot.deleteRecursively(); compileRoot.mkdirs()
+        val coreSrc = java.io.File(Engine.root(ctx), "core")
+        if (coreSrc.isDirectory) coreSrc.copyRecursively(java.io.File(compileRoot, "core"), overwrite = true)
+        val aStd = java.io.File(Engine.root(ctx), "android/stdlib")
+        if (aStd.isDirectory) aStd.listFiles { f -> f.isFile && f.name.endsWith(".subl") }
+            ?.sortedBy { it.name }?.forEach { it.copyTo(java.io.File(compileRoot, it.name), overwrite = true) }
+        for ((f, rel) in project.walkRelative()) {
+            if (rel.isBlank() || !f.isFile()) continue
+            if (rel.startsWith("build/") || rel.startsWith(".")) continue
+            if (!rel.endsWith(".subl") && !rel.endsWith(".subs") && !rel.endsWith(".settings")) continue
+            val target = java.io.File(compileRoot, rel)
+            target.parentFile?.mkdirs()
+            f.inputStream().use { ins -> target.outputStream().use { out -> ins.copyTo(out) } }
+        }
+        // 处理器装载（文件名=处理器名=关注注解；@interested 声明跨注解关注）
+        val procsDir = java.io.File(Engine.root(ctx), "android/procs")
+        val processors = procsDir.listFiles { f -> f.isFile && f.name.endsWith(".subs") }
+            ?.sortedBy { it.name }?.map { f ->
+                val name = f.name.removeSuffix(".subs")
+                val txt = f.readText()
+                val extra = Regex("@interested\\s+([A-Za-z0-9_, ]+)").find(txt)?.groupValues?.get(1)
+                    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+                ScriptProcessor(
+                    name = name,
+                    interestedAnnotations = setOf(name) + extra,
+                    scriptSource = txt,
+                    scriptFileName = f.path,
+                    stdlibDir = coreSrc,
+                )
+            } ?: emptyList()
+        val options = mapOf(
+            "appDir" to "", "jsPath" to "", "outDir" to "", "sdkDir" to liteaSdkDir().path,
+        )
+        val mm = MultiModule(compileRoot)
+        val pbag = mm.processModules(ProcessorPipeline.moduleTransformer(processors, options))
+        val bag = mm.checkAll()
+        bag.absorb(pbag)
+        if (bag.hasError) throw RuntimeException("安卓工程编译未通过，请看「诊断」页签\n" + bag.report(source = src))
+        return mm.generateJs()
+    }
+
     fun importLiteASdk(uri: android.net.Uri) {
         if (liteaImporting.value) return
         liteaImporting.value = true
@@ -2236,6 +2332,30 @@ fun main() {
         private const val DEMO_SOURCE = """@impure
 fun main() =
     print("hello,world!")
+"""
+        // 原生安卓工程示例（SfA）：@android 内建 + @composable 视图树
+        private const val ANDROID_DEMO_SOURCE = """@impure
+fun main(): Null {
+    onCreate {
+        unchecked log("Sublimation app started", 2)
+    }
+    onStart {
+        layout(content)
+    }
+}
+
+@composable
+fun content(_e: Any): Box {
+    @mut var n = 0
+    @mut var label = Text(text = "count: 0")
+    return Box(modifier = Plain(), contentAlignment = Center()) {
+        Box(modifier = Plain()) {
+            Button(onClick = { n = n + 1; label.text = concat("count: ", toStr(n)) }) {
+                label
+            }
+        }
+    }
+}
 """
         // 脚本模式时期的旧种子内容（检测到就迁移为新的编译模式示例）
         private const val OLD_SCRIPT_DEMO = """// Sublimation 脚本示例 —— 点右上角「运行」试试

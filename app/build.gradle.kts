@@ -60,6 +60,7 @@ android {
 
 dependencies {
     // 语言引擎：复合构建来自 ../sublimation（includeBuild 直接消费源码产物）
+    implementation("sugared.functor:annotationproc:1.1-SNAPSHOT")
     implementation("sugared.functor:frontend:1.1-SNAPSHOT")
     implementation("sugared.functor:compiler:1.1-SNAPSHOT")
     implementation("sugared.functor:interpreter:1.1-SNAPSHOT")

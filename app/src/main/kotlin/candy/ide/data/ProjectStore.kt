@@ -99,7 +99,14 @@ object ProjectStore {
             if (t == TYPE_JS || t == TYPE_SCRIPT || t == TYPE_JSAPK || t == TYPE_MD) return t
         }
         val hasSubl = dir.walk().any { it.isFile() && it.name.endsWith(".subl") }
-        if (hasSubl) return TYPE_JS
+        if (hasSubl) {
+            // 源码里用安卓注解（@composable/@android）→ 安卓工程（原生 APK 链路）
+            val androidish = dir.walk().any { f ->
+                f.isFile() && f.name.endsWith(".subl") && runCatching { f.readText() }
+                    .getOrNull().orEmpty().let { it.contains("@composable") || it.contains("@android") }
+            }
+            return if (androidish) TYPE_JSAPK else TYPE_JS
+        }
         val hasMd = dir.walk().any { it.isFile() && it.name.endsWith(".md") }
         return if (hasMd) TYPE_MD else TYPE_SCRIPT
     }

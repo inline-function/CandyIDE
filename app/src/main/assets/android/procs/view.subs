@@ -1,0 +1,63 @@
+// view.subs —— @view 视图结构体处理器（android doc/安卓标准库.md §视图结构体）
+//
+// 职责：
+//   1. 给每个 @view 结构体注入编译期属性：children: List[Any]（body 擦除后承载子视图）、
+//      recomposion: (Any) => Null（视图被修改时的重组通知回调）——框架原语 injectViewStruct 幂等注入；
+//   2. 每个视图构造点 X(...) { 子视图 } 生成单参函数 recomposion$X$N（N = 该视图名的生成次序），
+//      函数体调用 @android 桥 androidRecompose，把修改好的视图传给 KT 端；
+//   3. 调用框架原语 rewriteViewCtors：body 擦除、子视图成为 children 成员、
+//      recomposion 位绑定到对应 recomposion$X$N。
+//
+// 站点清单格式：viewCtorSites(0) 每行一条 "funName|viewName|ordinal"。
+// 幂等性：injectViewStruct 第二轮起字段无变化、addDecl 同名跳过、rewriteViewCtors 第二轮无匹配 —— 多轮引擎收敛。
+
+// ---------- 1. @view 结构体重组：body → children + recomposion ----------
+
+fun rebuildAll(xs: List[Str]): Null =
+    when (xs) {
+        Nil => null
+        is Cons(s, rest) => {
+            injectViewStruct(s);
+            rebuildAll(rest)
+        }
+        else => null
+    }
+
+// ---------- 2. 构造点 → recomposion$X$N 单参函数 ----------
+
+fun emitAll(xs: List[Str]): Null =
+    when (xs) {
+        Nil => null
+        is Cons(line, rest) => { emitOne(line); emitAll(rest) }
+        else => null
+    }
+
+fun emitOne(line: Str): Null {
+    var parts: List[Str] = strSplit(line, "|");
+    var view: Str = nth(parts, 1);
+    var ord: Str = nth(parts, 2);
+    addDecl(recomposionFun(view, ord))
+}
+
+fun recomposionFun(view: Str, ord: Str): Str =
+    "@android @impure fun recomposion$" + view + "$" + ord + "(v: Any): Null = androidRecompose(\"" + view + "\", " + ord + ", v)"
+
+// List[Str] 按下标取（0 基）。
+fun nth(xs: List[Str], i: Nat): Str =
+    when (xs) {
+        Nil => ""
+        is Cons(h, rest) => if (i == 0) h else nth(rest, i - 1)
+        else => ""
+    }
+
+// ---------- 3. 构造点改写 + 驱动 ----------
+
+fun processViews(): Null {
+    var views: List[Str] = structsWithAnnotation("view");
+    var sites: List[Str] = viewCtorSites(0);
+    rebuildAll(views);
+    emitAll(sites);
+    rewriteViewCtors(0)
+}
+
+processViews()
