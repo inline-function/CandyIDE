@@ -18,6 +18,20 @@ import kotlinx.coroutines.withContext
  */
 object GitManager {
 
+    @Volatile
+    var appCtx: android.content.Context? = null
+
+    /** 调试输出：写 files/candy/logs/agent_debug.log（adb logcat 与设备日志页都能看到） */
+    private fun dbg(msg: String) {
+        val c = appCtx ?: return
+        runCatching {
+            val dir = java.io.File(candy.ide.engine.Engine.root(c), "logs")
+            dir.mkdirs()
+            val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+            java.io.File(dir, "agent_debug.log").appendText("[" + ts + "] " + msg + "\n")
+        }
+    }
+
     private const val TERMUX_BIN = "/data/data/com.termux/files/usr/bin/git"
     private const val TERMUX_PKG = "/data/data/com.termux/files/usr/bin/pkg"
     private const val RELAY_DIR = TerminalBridge.RELAY_DIR
@@ -34,6 +48,43 @@ object GitManager {
         val message: String,
     )
 
+    /** RUN_COMMAND 通道是否可用：发 echo 探针，1.5s 内中转文件有内容即通。
+     *  Termux 默认不允许外部应用调用（~/.termux/termux.properties 需 allow-external-apps=true），
+     *  没开启时服务收 intent 但不执行 —— 探针就是为这个区分。 */
+    suspend fun runCommandReady(ctx: Context): Boolean = withContext(Dispatchers.IO) {
+        if (!isTermuxInstalled(ctx) || !TerminalBridge.hasRunCommandGrant(ctx)) return@withContext false
+        val relay = File(RELAY_DIR)
+        runCatching { relay.mkdirs() }
+        File(OUT_FILE).delete()
+        File("$RELAY_DIR/.git_done").delete()
+        File("$RELAY_DIR/probe.sh").writeText(
+            "#!/data/data/com.termux/files/usr/bin/sh\necho candyalive > " + OUT_FILE + "\necho done > $RELAY_DIR/.git_done\n",
+        )
+        val intent = android.content.Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("$RELAY_DIR/probe.sh"))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", RELAY_DIR)
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+        }
+        val sent = runCatching { ctx.startService(intent); true }.getOrElse { false }
+        if (!sent) { dbg("通道探针：startService 失败"); return@withContext false }
+        var waited = 0
+        while (waited < 1500) {
+            delay(50)
+            waited += 50
+            if (File(OUT_FILE).isFile) {
+                val ok = runCatching { File(OUT_FILE).readText() }.getOrDefault("").contains("candyalive")
+                dbg("通道探针：命中（" + waited + "ms）")
+                File(OUT_FILE).delete()
+                File("$RELAY_DIR/.git_done").delete()
+                return@withContext ok
+            }
+        }
+        dbg("通道探针：超时未响应（Termux 未开启 allow-external-apps？）")
+        false
+    }
+
     // ---- 安装检测 ----
 
     fun isShizukuInstalled(ctx: Context): Boolean = runCatching {
@@ -45,28 +96,35 @@ object GitManager {
 
     /** Termux 里有没有装 git：执行 `git --version`，执行成功即已装 */
     suspend fun isGitReady(ctx: Context): Boolean = withContext(Dispatchers.IO) {
-        if (!isTermuxInstalled(ctx)) return@withContext false
+        if (!isTermuxInstalled(ctx)) { dbg("git 就绪检查：Termux 未安装"); return@withContext false }
         if (!TerminalBridge.hasRunCommandGrant(ctx)) {
-            // Shizuku 通道里查 git（路径通常不在 shell PATH，仍试一次）
+            dbg("git 就绪检查：RUN_COMMAND 未授权")
             return@withContext false
         }
-        runCatching {
+        try {
             val r = execViaTermux(ctx, null, TERMUX_BIN, "--version")
+            dbg("git 就绪检查：ok=" + r.ok + " out=" + r.output.take(120))
             r.ok && r.output.contains("git version")
-        }.getOrDefault(false)
+        } catch (t: Throwable) {
+            dbg("git 就绪检查异常：" + t)
+            false
+        }
     }
 
     /** 安装 git：pkg install git -y（输出走中转文件，UI 显示加载框等待完成） */
     suspend fun installGit(ctx: Context): GitResult = withContext(Dispatchers.IO) {
-        execViaTermux(ctx, null, TERMUX_PKG, "install", "git", "-y")
+        dbg("开始安装 git：pkg install git -y")
+        val r = execViaTermux(ctx, null, TERMUX_PKG, "install", "git", "-y")
+        dbg("安装 git 结果：ok=" + r.ok + " out=" + r.output.take(200))
+        r
     }
 
     // ---- 命令执行 ----
 
     /** 经 Termux RUN_COMMAND 同步执行一条命令（脚本输出写入中转文件并轮询） */
     private suspend fun execViaTermux(ctx: Context, cwd: String?, executable: String, vararg args: String): GitResult {
-        if (!isTermuxInstalled(ctx)) return GitResult(false, "Termux 未安装")
-        if (!TerminalBridge.hasRunCommandGrant(ctx)) return GitResult(false, "Termux 未授予 RUN_COMMAND 权限")
+        if (!isTermuxInstalled(ctx)) { dbg("exec：Termux 未安装"); return GitResult(false, "Termux 未安装") }
+        if (!TerminalBridge.hasRunCommandGrant(ctx)) { dbg("exec：RUN_COMMAND 未授权"); return GitResult(false, "Termux 未授予 RUN_COMMAND 权限") }
         val relay = File(RELAY_DIR)
         relay.mkdirs()
         // 旧的输出/完成标记清掉
@@ -87,7 +145,8 @@ object GitManager {
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
         }
         val sent = runCatching { ctx.startService(intent); true }.getOrElse { false }
-        if (!sent) return GitResult(false, "无法提交到 Termux（RUN_COMMAND 被拒）")
+        if (!sent) { dbg("exec：startService 失败"); return GitResult(false, "无法提交到 Termux（RUN_COMMAND 被拒）") }
+        dbg("exec：已提交到 Termux，等待完成标记…")
         // 轮询完成标记（git --version 秒回；pkg install 可能要 60s+）
         var waited = 0
         val timeoutMs = 240_000L

@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import candy.ide.ui.theme.CandyTextDim
+import candy.ide.ui.theme.CandyPrimary
 import candy.ide.data.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
@@ -99,6 +101,22 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
             },
         )
     }
+    // Termux RUN_COMMAND 运行时权限申请：Termux 已装但未授权时弹系统授权框，
+    // 授权后立即刷新协同状态（git 就绪检查依赖它）
+    val runCmdLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        if (result["com.termux.permission.RUN_COMMAND"] == true) {
+            vm.refreshCompanions(ctx)
+        }
+    }
+    LaunchedEffect(vm.termuxInstalled.value) {
+        if (vm.termuxInstalled.value && !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx)) {
+            runCmdLauncher.launch(arrayOf("com.termux.permission.RUN_COMMAND"))
+        }
+        if (vm.termuxInstalled.value) vm.probeRunCommand(ctx)
+    }
+
     // ---- 协同应用检测（首次使用）----
     var companionDismissed by remember { mutableStateOf(Settings.companionDialogShown) }
     var gitInitDeferred by remember { mutableStateOf(false) }
@@ -136,6 +154,29 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
                         installed = vm.termuxInstalled.value,
                         onOpen = { vm.openUrl(ctx, "https://f-droid.org/packages/com.termux/") },
                     )
+                    // Termux 已装但 RUN_COMMAND 通道未通（默认不允许外部应用调用）
+                    if (vm.termuxInstalled.value && !vm.runCmdReady.value) {
+                        Surface(
+                            color = candy.ide.ui.theme.CandySurfaceVariant,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(10.dp)
+                                    .clickable { vm.openTermuxExternalSetup(ctx) },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("开启 Termux 外部调用", color = CandyText, fontSize = 13.sp)
+                                    Text(
+                                        "Termux 默认不允许外部应用执行命令。命令已复制，点击跳转 Termux 粘贴执行一次。",
+                                        color = CandyTextDim, fontSize = 10.sp,
+                                    )
+                                }
+                                Text("去开启", color = CandyPrimary, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {},
@@ -156,6 +197,25 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
         ) {
             vm.gitInitDialog.value = true
         }
+    }
+    // 通道未通：引导开启 Termux 外部调用（命令已复制，跳过去粘贴执行一次）
+    if (vm.termuxSetupNeeded.value) {
+        AlertDialog(
+            onDismissRequest = { vm.termuxSetupNeeded.value = false },
+            title = { Text("需要开启 Termux 外部调用") },
+            text = {
+                Text("Termux 默认不允许其它应用执行命令。\n点击「去开启」会复制命令并跳转 Termux，粘贴执行一次（系统询问存储权限时同意）。\n\ntermux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.termuxSetupNeeded.value = false
+                    vm.openTermuxExternalSetup(ctx)
+                }) { Text("去开启") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.termuxSetupNeeded.value = false }) { Text("稍后") }
+            },
+        )
     }
     if (vm.gitInstallNeeded.value) {
         AlertDialog(

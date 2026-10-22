@@ -231,6 +231,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 Engine.bootstrap(getApplication())
                 Settings.attach(getApplication())
+                candy.ide.git.GitManager.appCtx = getApplication()
                 schemeVersion.intValue++
             } catch (e: Throwable) {
                 mdLog("**[引擎]** 初始化失败 · " + (e.message ?: e.javaClass.simpleName))
@@ -1241,27 +1242,56 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val wasTermux = termuxInstalled.value
         shizukuInstalled.value = candy.ide.git.GitManager.isShizukuInstalled(ctx)
         termuxInstalled.value = candy.ide.git.GitManager.isTermuxInstalled(ctx)
-        if (!wasTermux && termuxInstalled.value) {
-            // 刚装好 Termux：顺手查 git 就绪
-            viewModelScope.launch {
-                gitReady.value = candy.ide.git.GitManager.isGitReady(ctx)
-            }
-        } else if (termuxInstalled.value && !gitReady.value) {
-            viewModelScope.launch {
-                gitReady.value = candy.ide.git.GitManager.isGitReady(ctx)
+        // Termux 已装：先探 RUN_COMMAND 通道（Termux 默认不允许外部应用调用），
+        // 通了才查 git 就绪（通道不通时 exec 只会空等超时）
+        viewModelScope.launch {
+            if (termuxInstalled.value) {
+                runCmdReady.value = candy.ide.git.GitManager.runCommandReady(ctx)
+                gitReady.value = if (runCmdReady.value) candy.ide.git.GitManager.isGitReady(ctx) else false
+            } else {
+                runCmdReady.value = false
+                gitReady.value = false
             }
         }
-        
     }
 
-    /** 日志按钮长按：进 git 页（未就绪先引导安装） */
+    /** RUN_COMMAND 通道是否可用（探针） */
+    val runCmdReady = mutableStateOf(false)
+
+    /** 快速探活 RUN_COMMAND 通道（Termux 允许外部调用？） */
+    fun probeRunCommand(ctx: android.content.Context) {
+        viewModelScope.launch {
+            runCmdReady.value = candy.ide.git.GitManager.runCommandReady(ctx)
+        }
+    }
+
+    /** 一键开启 Termux 外部应用调用：命令复制到剪贴板并跳转 Termux */
+    fun openTermuxExternalSetup(ctx: android.content.Context) {
+        val cmd = "termux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings"
+        runCatching {
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("termux", cmd))
+        }
+        candy.ide.terminal.TerminalBridge.openTermux(ctx)
+        toast.value = "命令已复制，在 Termux 里粘贴执行一次即可"
+    }
+
+    /** 「需要开启 Termux 外部调用」对话框 */
+    val termuxSetupNeeded = mutableStateOf(false)
+
+    /** 日志按钮长按：进 git 页（通道没通引导开启、没装 git 引导安装） */
     fun openGitPage(ctx: android.content.Context) {
         viewModelScope.launch {
-            if (candy.ide.git.GitManager.isGitReady(ctx)) {
-                screen.value = Screen.Git
-                checkCloudUpdates(ctx)
-            } else {
-                gitInstallNeeded.value = true
+            if (!runCmdReady.value) runCmdReady.value = candy.ide.git.GitManager.runCommandReady(ctx)
+            when {
+                !termuxInstalled.value -> gitInstallNeeded.value = true
+                !runCmdReady.value -> termuxSetupNeeded.value = true
+                candy.ide.git.GitManager.isGitReady(ctx) -> {
+                    gitReady.value = true
+                    screen.value = Screen.Git
+                    checkCloudUpdates(ctx)
+                }
+                else -> gitInstallNeeded.value = true
             }
         }
     }
@@ -1534,7 +1564,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         installPkg(apk, pendingPkg.value)
     }
 
-    /** 安装完成反馈（成弹「打开」、败弹原因），installing 期间 UI 显示等待框 */
+    /** 安装完成反馈（成弹「打开」、败弹原因），installing 期间 UI 显示等待框。
+     *  无 Shizuku 时降级为系统安装器（意图），用户在系统界面完成安装，装完点「打开」启动应用。 */
     fun installPkg(apk: CandyPath, pkg: String? = null) {
         if (installing.value) return
         installing.value = true
@@ -1549,8 +1580,18 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     runFailed.value = false
                     mdLog("**[安装]** " + msg)
                 } else {
-                    installError.value = msg
-                    mdLog("**[安装]** Shizuku 不可用：" + msg + " · 请在设置里连接 Shizuku，或用其它应用打开")
+                    // 无 Shizuku：意图调用系统安装器（ACTION_VIEW apk mime，FileProvider 授权）
+                    openExternal(getApplication(), apk)
+                    val knownPkg = pkg ?: pendingPkg.value
+                    if (knownPkg != null) {
+                        // 包名已知：直接给「打开」按钮，用户在系统界面装完点它启动应用
+                        installedPkg.value = knownPkg
+                        runFailed.value = false
+                        mdLog("**[安装]** " + msg + " · 已打开系统安装器，装完点「打开」启动应用")
+                    } else {
+                        installError.value = msg
+                        mdLog("**[安装]** " + msg + " · 已打开系统安装器，装完回来即可")
+                    }
                 }
             }
         }

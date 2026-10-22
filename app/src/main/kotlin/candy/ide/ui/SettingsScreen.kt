@@ -89,6 +89,14 @@ fun SettingsScreen(vm: CandyViewModel) {
     var pendingTermuxForGit by remember { mutableStateOf(false) }
     var pendingInstallGit by remember { mutableStateOf(false) }
     var termuxJustInstalled by remember { mutableStateOf(false) }
+    val runCmdPermLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        if (result["com.termux.permission.RUN_COMMAND"] == true) {
+            // 授权成功：如果 Termux 已装，直接进入“是否安装 git”
+            if (vm.termuxInstalled.value) pendingInstallGit = true
+        }
+    }
     var pendingReset by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf(false) }
     var pendingResetConfirm by remember { mutableStateOf(false) }
@@ -279,10 +287,23 @@ fun SettingsScreen(vm: CandyViewModel) {
             }
             // 外部文件访问权限：跳系统「所有文件访问」设置页，状态即时回读
             item {
-                var extGranted by remember(resumeTick) { mutableStateOf(android.os.Environment.isExternalStorageManager()) }
+                var extGranted by remember(resumeTick) {
+                    mutableStateOf(
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
+                            android.os.Environment.isExternalStorageManager()
+                        else
+                            ctx.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                                android.content.pm.PackageManager.PERMISSION_GRANTED,
+                    )
+                }
                 val extLauncher = rememberLauncherForActivityResult(
                     androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
                 ) { extGranted = android.os.Environment.isExternalStorageManager() }
+                val permLauncher = rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+                ) { result ->
+                    extGranted = result.values.all { it }
+                }
                 Surface(color = CandySurface) {
                     Row(
                         Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
@@ -297,13 +318,28 @@ fun SettingsScreen(vm: CandyViewModel) {
                         }
                         Switch(
                             checked = extGranted,
-                            onCheckedChange = {
-                                if (!extGranted) runCatching {
-                                    val intent = android.content.Intent(
-                                        "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",
-                                        android.net.Uri.parse("package:" + ctx.packageName),
-                                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    extLauncher.launch(intent)
+                            onCheckedChange = { asked ->
+                                if (!asked) return@Switch
+                                val sdk = android.os.Build.VERSION.SDK_INT
+                                if (sdk >= android.os.Build.VERSION_CODES.R) {
+                                    // 安卓 11+：跳「所有文件访问」设置页
+                                    runCatching {
+                                        val intent = android.content.Intent(
+                                            "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",
+                                            android.net.Uri.parse("package:" + ctx.packageName),
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        extLauncher.launch(intent)
+                                    }
+                                } else {
+                                    // 安卓 10 及以下：申请普通读写权限
+                                    runCatching {
+                                        permLauncher.launch(
+                                            arrayOf(
+                                                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                                                android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                            ),
+                                        )
+                                    }
                                 }
                             },
                         )
@@ -673,6 +709,12 @@ fun SettingsScreen(vm: CandyViewModel) {
                     when {
                         vm.gitReady.value -> Toast.makeText(ctx, "您已安装git", Toast.LENGTH_SHORT).show()
                         !vm.termuxInstalled.value -> pendingTermuxForGit = true
+                        !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx) -> {
+                            // 没授权先请求（弹系统授权框），授权后状态自动刷新
+                            runCmdPermLauncher.launch(arrayOf("com.termux.permission.RUN_COMMAND"))
+                            Toast.makeText(ctx, "需要授权 Termux 执行命令，授权后重试", Toast.LENGTH_LONG).show()
+                        }
+                        !vm.runCmdReady.value -> vm.termuxSetupNeeded.value = true
                         else -> pendingInstallGit = true
                     }
                 }) {
@@ -681,9 +723,12 @@ fun SettingsScreen(vm: CandyViewModel) {
                             Text("安装 git", color = CandyText)
                             Spacer(Modifier.size(2.dp))
                             Text(
-                                if (vm.gitReady.value) "已安装 ✓（点击再装一次）"
-                                else if (vm.termuxInstalled.value) "通过 Termux 安装（pkg install git）"
-                                else "需要先安装 Termux",
+                                when {
+                                    vm.gitReady.value -> "已安装 ✓（点击再装一次）"
+                                    !vm.termuxInstalled.value -> "需要先安装 Termux"
+                                    !vm.runCmdReady.value -> "需要先开启 Termux 外部调用"
+                                    else -> "通过 Termux 安装（pkg install git）"
+                                },
                                 color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
                             )
                         }

@@ -4,6 +4,9 @@
 
     <!-- 外部文件访问（设置页可开启）：不声明则系统设置页里该开关为灰色且无法打开 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <!-- 安卓 10 及以下：普通读写存储权限（MANAGE_EXTERNAL_STORAGE 从 11 才有） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- AI agent 联网（OpenAI 兼容端点） -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 明文流量：私有部署/自建端点可能无 TLS，允许 http（https 默认可用） -->

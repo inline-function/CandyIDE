@@ -8,6 +8,20 @@ CandyIDE 的 git 能力由协同应用提供：
 两个都装上体验最完整。首次使用时如果检测到缺协同应用，IDE 会弹对话框给出下载链接，
 安装后回到 IDE 自动刷新状态（✓/✗ 实时变化），两个都装上对话框自动关闭。
 
+## 开启 Termux 外部调用（重要）
+
+Termux 默认不允许其它应用执行命令。如果 IDE 提示「需要开启 Termux 外部调用」：
+
+1. 打开 Termux
+2. 粘贴执行一次（首次使用对话框里的「去开启」会自动复制命令）：
+
+```
+termux-setup-storage && echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings
+```
+
+3. 系统会询问存储权限，同意（IDE 与 Termux 通过共享目录传递命令输出）
+4. 回到 IDE，状态会自动刷新为 ✓
+
 ## git 初始化
 
 装好 Termux 后，IDE 会询问是否初始化 git（执行 `pkg install git`）。

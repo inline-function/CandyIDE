@@ -28,11 +28,19 @@ object TerminalBridge {
     fun exec(ctx: Context, cmd: String, cwd: String? = null): Result {
         val trimmed = cmd.trim()
         if (trimmed.isEmpty()) return Result(Channel.NONE, "")
-        // 1) Shizuku
-        if (ShizukuShell.exec(arrayOf("sh", "-c", "echo ok")) != null) {
+        // git 命令必须走 Termux：Shizuku 的 shell 用户被 SELinux 挡在 /data/data/com.termux 之外，
+        // PATH 里也没有 git，Shizuku 通道跑 git 必定 "command not found"
+        val isGitCmd = trimmed.startsWith("git ") || trimmed == "git" || trimmed.startsWith("git\t")
+        if (!isGitCmd && ShizukuShell.exec(arrayOf("sh", "-c", "echo ok")) != null) {
+            // 1) Shizuku
             val full = if (cwd != null) "cd \"" + cwd + "\" && " + trimmed else trimmed
             val out = ShizukuShell.exec(arrayOf("sh", "-c", full)) ?: "（无输出）"
             return Result(Channel.SHIZUKU, out)
+        }
+        if (isGitCmd) {
+            // git：交给 Termux（未授权会提示）—— RUN_COMMAND 通道由 GitManager 共享同一中转机制
+            val via = runGitViaTermux(ctx, trimmed, cwd)
+            if (via != null) return via
         }
         // 2) Termux RUN_COMMAND：把命令包成脚本，输出重定向到中转文件
         if (isTermuxInstalled(ctx)) {
@@ -71,6 +79,34 @@ object TerminalBridge {
         return txt
     }
 
+    /** 把 git 命令交给 Termux 执行：写脚本 -> RUN_COMMAND -> 中转输出文件（与 GitManager 同机制） */
+        /** 把 git 命令交给 Termux 执行：写脚本 -> RUN_COMMAND -> 中转输出文件（与 GitManager 同机制） */
+    private fun runGitViaTermux(ctx: Context, cmd: String, cwd: String?): Result? {
+        if (!isTermuxInstalled(ctx)) return null
+        if (!hasRunCommandGrant(ctx)) return Result(Channel.TERMUX_UNSUITABLE,
+            "Termux 未授予 RUN_COMMAND 权限\nIDE 里的 git 命令必须走 Termux（Shizuku 的 shell 看不见 Termux 的 git）\n请在系统设置→应用→CandyIDE→权限 里授予")
+        val relay = File(RELAY_DIR)
+        relay.mkdirs()
+        File(OUT_FILE).delete()
+        File("$RELAY_DIR/.term_done").delete()
+        val script = buildString {
+            append("#!/data/data/com.termux/files/usr/bin/sh\n")
+            if (cwd != null) append("cd \"" + cwd + "\"\n")
+            append(cmd).append(" > ").append(OUT_FILE).append(" 2>&1\n")
+            append("echo done > $RELAY_DIR/.term_done\n")
+        }
+        File("$RELAY_DIR/git_via.sh").writeText(script)
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("$RELAY_DIR/git_via.sh"))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", cwd ?: RELAY_DIR)
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+        }
+        val sent = runCatching { ctx.startService(intent); true }.getOrElse { false }
+        if (!sent) return Result(Channel.TERMUX_UNSUITABLE, "无法提交到 Termux（RUN_COMMAND 被拒）")
+        return Result(Channel.TERMUX, "已提交到 Termux 执行 git，输出写入 $OUT_FILE")
+    }
     /** CandyIDE 是否已被授予 Termux RUN_COMMAND（dangerous 级运行时权限） */
     fun hasRunCommandGrant(ctx: Context): Boolean = runCatching {
         ctx.checkSelfPermission("com.termux.permission.RUN_COMMAND") ==

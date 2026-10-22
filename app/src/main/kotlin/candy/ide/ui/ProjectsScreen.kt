@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
@@ -68,11 +69,11 @@ fun ProjectsScreen(vm: CandyViewModel) {
             TopAppBar(
                 title = { CandyTitleWithEgg() },
                 actions = {
-                    IconButton(onClick = { vm.goSettings() }, modifier = Modifier.combinedClickable(
-                        onClick = { vm.goSettings() },
-                        onLongClick = { vm.screen.value = Screen.Terminal },
-                    )) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置（长按打开终端）", tint = CandyText)
+                    IconButton(onClick = { vm.screen.value = Screen.Terminal }) {
+                        Icon(Icons.Default.Terminal, contentDescription = "终端", tint = CandyText)
+                    }
+                    IconButton(onClick = { vm.goSettings() }) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置", tint = CandyText)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -167,7 +168,7 @@ private fun ProjectCard(dir: candy.ide.fs.CandyPath, onClick: () -> Unit, onSett
                         when (type) {
                             ProjectStore.TYPE_JSAPK -> "安卓工程"
                             ProjectStore.TYPE_SCRIPT -> "脚本工程"
-                            ProjectStore.TYPE_MD -> "MD工程"
+                        ProjectStore.TYPE_MD -> "MD工程"
                             else -> "JS工程"
                         },
                         color = if (type == ProjectStore.TYPE_JSAPK) CandyPrimary else if (type == ProjectStore.TYPE_JS) CandySecondary else CandyTextDim,
