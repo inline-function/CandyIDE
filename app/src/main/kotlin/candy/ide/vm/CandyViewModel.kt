@@ -190,8 +190,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             val tag = Regex.fromLiteral("[" + name + ":")
             // 无位置前缀的诊断（E-IMPURE-CALL 等编译器诊断不带「[file:l:c]」前缀）：
             // 只要 range 落在本文件行数内就收；带前缀的仍按前缀归属本文件判定
-            val items = analysis.diagnosticsFor(name)
-                .filter { d ->
+            // Hint 级（如「类型类 Num 无成员」的风格提示）不进编辑器诊断，避免光标经过就弹噪音
+        val items = analysis.diagnosticsFor(name)
+                .filter { d -> d.severity != sugared.functor.lsp.DiagnosticSeverity.Hint &&
                     // 带本文件名前缀的诊断（lexer note 类）直接收
                     d.message.contains(tag) ||
                     // 无前缀的编译器诊断（如 E-IMPURE-CALL）：行号落在文件内即收
@@ -1134,7 +1135,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             } catch (t: Throwable) {
-                mdLog("**[错误]** " + linkPositions(t.message?.replace("`", "'") ?: t.javaClass.simpleName, file))
+                mdLog("**[错误]** " + (t.message?.replace("`", "'") ?: t.javaClass.simpleName).substringBefore("\n").take(400))
+                    mdLog("**[提示]** 完整诊断请看「诊断」页签")
                 main.post {
                     runFailed.value = true
                     running.value = false
@@ -1242,7 +1244,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     pendingApk.value = apk
                 }
             } catch (t: Throwable) {
-                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
+                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName).substringBefore("\n").take(400))
+                mdLog("**[提示]** 完整诊断请看「诊断」页签")
                 mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
                 main.post { runFailed.value = true }
             } finally {
@@ -1592,7 +1595,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (t: Throwable) {
                 runCatching { dir.find("__entry__.subl")?.delete() }
-                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName))
+                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName).substringBefore("\n").take(400))
+                mdLog("**[提示]** 完整诊断请看「诊断」页签")
                 mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
             } finally {
                 main.post { running.value = false }
@@ -1647,7 +1651,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (t: Throwable) {
-                mdLog("**[打包失败]** " + linkPositions(t.message?.replace("`", "'") ?: t.javaClass.simpleName, project.find(JsApkConfig.load(project).entry)))
+                mdLog("**[打包失败]** " + (t.message?.replace("`", "'") ?: t.javaClass.simpleName).substringBefore("\n").take(400))
+                    mdLog("**[提示]** 完整诊断请看「诊断」页签")
                 main.post { runFailed.value = true }
             } finally {
                 main.post { running.value = false }

@@ -10,10 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -142,10 +139,8 @@ fun EditorScreen(vm: CandyViewModel) {
     val isEditableFile = safe != null && !isMdProject &&
         (!safe.name.endsWith(".md") || vm.mdTextMode[safe.key] == true)
     var longMenu by remember { mutableStateOf<LongPressMenu?>(null) }
-    var outlineOpen by remember { mutableStateOf(false) }
     var sigTick by remember { mutableIntStateOf(0) }
     var sigLabel by remember { mutableStateOf<String?>(null) }
-    var outlineSymbols by remember { mutableStateOf<List<sugared.functor.lsp.DocumentSymbol>?>(null) }
     var quickMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var diagInfo by remember { mutableStateOf<candy.ide.data.DiagItem?>(null) }
     var quickWord by remember { mutableStateOf<String?>(null) }
@@ -388,10 +383,6 @@ fun EditorScreen(vm: CandyViewModel) {
                                             moreMenu = false
                                             vm.goAgent()
                                         },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("符号大纲") },
-                                        onClick = { moreMenu = false; outlineOpen = true },
                                     )
                                     DropdownMenuItem(
                                         text = { Text("格式化文档") },
@@ -1094,50 +1085,6 @@ fun EditorScreen(vm: CandyViewModel) {
         )
     }
 
-    // 符号大纲对话框
-    if (outlineOpen) {
-        val f = currentFile
-        LaunchedEffect(outlineOpen, f) {
-            outlineSymbols = runCatching {
-                f?.let { vm.analysis()?.documentSymbols(it.name) }
-            }.getOrNull()
-        }
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { outlineOpen = false },
-            title = { Text(f?.name ?: "符号大纲", color = CandyText) },
-            text = {
-                val syms = outlineSymbols
-                if (syms == null) {
-                    Text("正在分析…", color = CandyTextDim, fontSize = 12.sp)
-                } else if (syms.isEmpty()) {
-                    Text("本文件没有符号，或语言服务未就绪", color = CandyTextDim, fontSize = 12.sp)
-                } else {
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        items(syms) { s ->
-                            Text(
-                                text = s.name + (s.detail?.takeIf { it.isNotBlank() }?.let { "  —  " + it } ?: ""),
-                                color = CandyPrimary,
-                                fontSize = 13.sp,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        outlineOpen = false
-                                        vm.requestGoto(s.range.start.line.coerceAtLeast(0))
-                                    }
-                                    .padding(vertical = 4.dp),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { outlineOpen = false }) { Text("关闭") }
-            },
-        )
-    }
     renameReq?.let { req ->
         var newName by remember(req) { mutableStateOf(req.word) }
         AlertDialog(
