@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import candy.ide.editor.FontManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -408,81 +409,8 @@ fun SettingsScreen(vm: CandyViewModel) {
                 )
             }
             // ───────── LiteASDK：subl → APK 端上构建的精简安卓工具链 ─────────
-            item {
-                val pickSdk = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                    if (uri != null) vm.importLiteASdk(uri)
-                }
-                val importing by vm.liteaImporting
-                val ready = vm.liteaSdkReady()
-                var showPathDialog by remember { mutableStateOf(false) }
-                Surface(color = CandySurface, onClick = {
-                    if (!importing) showPathDialog = true
-                }, onLongClick = {
-                    // 长按走 SAF 文件选择器（部分厂商选择器会劫持点按）
-                    if (!importing) pickSdk.launch(arrayOf("*/*"))
-                }) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("导入 LiteASDK 工具链", color = if (ready) CandyText else CandyPrimary)
-                            Spacer(Modifier.size(2.dp))
-                            Text(
-                                text = if (ready) "已导入 · 端上 subl→apk 构建链路可用（再点一次即覆盖重导）" else "aarch64 精简安卓工具链：aapt2/d8/apksigner/zipalign + android.jar，解压到 IDE 私有目录",
-                                color = CandyTextDim, style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        if (importing) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = CandyPrimary)
-                        } else {
-                            Text(text = if (ready) "重新导入" else "未导入", color = CandyTextDim)
-                        }
-                    }
-                    }
-                }
-                if (showPathDialog) {
-                    var pathInput by remember { mutableStateOf("/sdcard/Download/LiteASDK.zip") }
-                    AlertDialog(
-                        onDismissRequest = { showPathDialog = false },
-                        title = { Text("导入 LiteASDK") },
-                        text = {
-                            Column {
-                                Text(
-                                    "填 zip 包在手机上的完整路径（点按走系统文件选择器被劫持时用这）。长按导入行则走系统选择器。",
-                                    color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
-                                )
-                                Spacer(Modifier.size(8.dp))
-                                OutlinedTextField(
-                                    value = pathInput,
-                                    onValueChange = { pathInput = it },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                showPathDialog = false
-                                vm.importLiteASdkFromPath(pathInput.trim())
-                            }) { Text("导入") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showPathDialog = false }) { Text("取消") }
-                        },
-                    )
-                }
-            }
-            item {
-                val msg = vm.liteaImportMsg.value
-                if (msg != null) AlertDialog(
-                    onDismissRequest = { vm.liteaImportMsg.value = null },
-                    title = { Text("LiteASDK") },
-                    text = { Text(msg, color = CandyText) },
-                    confirmButton = {
-                        TextButton(onClick = { vm.liteaImportMsg.value = null }) { Text("知道了") }
-                    },
-                )
-            }
+            item { LiteaImportRow(vm) }
+
             item { SectionTitle("诊断") }
             item {
                 Surface(color = CandySurface, onClick = { vm.goIdeLog() }) {
@@ -1139,5 +1067,86 @@ private fun openCandyA11ySettings(ctx: android.content.Context) {
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
+}
+
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun LiteaImportRow(vm: candy.ide.vm.CandyViewModel) {
+    val pickSdk = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.importLiteASdk(uri)
+    }
+    val importing by vm.liteaImporting
+    val ready = vm.liteaSdkReady()
+    var showPathDialog by remember { mutableStateOf(false) }
+    var pathInput by remember { mutableStateOf("/sdcard/Download/LiteASDK.zip") }
+    Surface(color = CandySurface) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = { if (!importing) showPathDialog = true },
+                    onLongClick = { if (!importing) pickSdk.launch(arrayOf("*/*")) },
+                ),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("导入 LiteASDK 工具链", color = if (ready) CandyText else CandyPrimary)
+                    Spacer(Modifier.size(2.dp))
+                    Text(
+                        text = if (ready) "已导入 · 端上 subl→apk 构建链路可用（再点一次即覆盖重导）"
+                        else "aarch64 精简安卓工具链：aapt2/d8/apksigner/zipalign + android.jar，解压到 IDE 私有目录",
+                        color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (importing) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = CandyPrimary)
+                } else {
+                    Text(text = if (ready) "重新导入" else "未导入", color = CandyTextDim)
+                }
+            }
+        }
+    }
+    if (showPathDialog) {
+        AlertDialog(
+            onDismissRequest = { showPathDialog = false },
+            title = { Text("导入 LiteASDK") },
+            text = {
+                Column {
+                    Text(
+                        "填 zip 包在手机上的完整路径（点按弹此对话框；长按导入行走系统文件选择器）。",
+                        color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    OutlinedTextField(
+                        value = pathInput,
+                        onValueChange = { pathInput = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPathDialog = false
+                    vm.importLiteASdkFromPath(pathInput.trim())
+                }) { Text("导入") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPathDialog = false }) { Text("取消") }
+            },
+        )
+    }
+    val msg = vm.liteaImportMsg.value
+    if (msg != null) AlertDialog(
+        onDismissRequest = { vm.liteaImportMsg.value = null },
+        title = { Text("LiteASDK") },
+        text = { Text(msg, color = CandyText) },
+        confirmButton = {
+            TextButton(onClick = { vm.liteaImportMsg.value = null }) { Text("知道了") }
+        },
+    )
 }
 
