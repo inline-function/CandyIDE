@@ -41,7 +41,7 @@ import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
 import candy.ide.vm.CandyViewModel
 
-enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git }
+enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource }
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
@@ -191,8 +191,10 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
     }
 
     // git 初始化引导：Termux 已装但 git 未装（首进工程 / 检测刷新发现刚装好 Termux）
-    LaunchedEffect(vm.termuxInstalled.value, vm.gitReady.value) {
-        if (workspaceReady && vm.termuxInstalled.value && !vm.gitReady.value &&
+    // git 初始化引导：只在 RUN_COMMAND 通道通（能真判定 git 装没装）且确实未装时弹；
+    // 通道没通时根本无法检测，不问（避免「Termux 尚未授权」被误报成「尚未初始化 git」）
+    LaunchedEffect(vm.termuxInstalled.value, vm.gitReady.value, vm.runCmdReady.value) {
+        if (workspaceReady && vm.termuxInstalled.value && vm.runCmdReady.value && !vm.gitReady.value &&
             !gitInitDeferred && !candy.ide.data.Settings.gitInitDeferred &&
             !vm.gitInitDialog.value && !vm.gitInstallNeeded.value
         ) {
@@ -292,6 +294,24 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
         Screen.Terminal -> TerminalScreen(vm)
         Screen.Agent -> AgentScreen(vm)
         Screen.Git -> GitScreen(vm)
+        Screen.ProjectLinks -> LinkListScreen(
+            vm = vm,
+            title = "项目地址",
+            links = listOf(
+                LinkItem("CandyIDE（本 IDE）", "https://github.com/inline-function/CandyIDE"),
+                LinkItem("Sublimation（语言引擎）", "https://github.com/inline-function/Sublimation"),
+            ),
+        )
+        Screen.OpenSource -> LinkListScreen(
+            vm = vm,
+            title = "开源组件",
+            links = listOf(
+                LinkItem("SoraEditor", "https://github.com/Rosemoe/sora-editor"),
+                LinkItem("commonmark-java", "https://github.com/commonmark/commonmark-java"),
+                LinkItem("ColorPicker", "https://github.com/koral--/android-gpuimage"),
+                LinkItem("Shizuku", "https://github.com/RikkaApps/Shizuku"),
+            ),
+        )
     }
 
     // 全局安装反馈：等待框 / 成功「是否打开」/ 失败提示

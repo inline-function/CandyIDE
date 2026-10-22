@@ -196,7 +196,14 @@ object GitManager {
 
     // ---- 高层操作 ----
 
+    /** 工程是否已初始化 git 仓库（.git 存在） */
+    fun hasRepo(project: CandyPath): Boolean {
+        val p = realPath(project) ?: return false
+        return File(p, ".git").exists()
+    }
+
     /** 初始化仓库（--allow-empty 提交让后续操作干净） */
+
     suspend fun initRepo(ctx: Context, project: CandyPath, initialMessage: String? = null): GitResult {
         val cwd = realPath(project) ?: return GitResult(false, "无法确定工程的真实路径（SAF 目录树不支持）")
         var r = git(ctx, cwd, "init")

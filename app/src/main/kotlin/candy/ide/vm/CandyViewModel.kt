@@ -522,6 +522,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun goScheme() { screen.value = Screen.Scheme }
     fun goDevelopers() { screen.value = Screen.Developers }
+    fun goProjectLinks() { screen.value = Screen.ProjectLinks }
+    fun goOpenSource() { screen.value = Screen.OpenSource }
     fun goTerminal() { screen.value = Screen.Terminal }
     fun goAgent() { screen.value = Screen.Agent }
 
@@ -1332,11 +1334,24 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     val gitInstallNeeded = mutableStateOf(false)
     val gitInitDialog = mutableStateOf(false)
 
-    /** 安装 git（pkg install git -y）：期间显示加载框 */
+    /** 安装 git（pkg install git -y）：期间显示加载框。
+     *  先探 RUN_COMMAND 通道——未授权 / Termux 没运行 / 未开启外部调用时引导，不空跑 */
     fun installGit(ctx: android.content.Context, onDone: (Boolean) -> Unit = {}) {
-        gitBusy.value = true
-        gitMsg.value = "正在安装 git…"
         viewModelScope.launch {
+            // 已装 git 就直接标记就绪
+            if (candy.ide.git.GitManager.isGitReady(ctx)) {
+                gitReady.value = true
+                onDone(true)
+                return@launch
+            }
+            // 通道没通：引导（可能授权了但 Termux 没开 / 未开启外部调用）
+            if (!candy.ide.git.GitManager.runCommandReady(ctx)) {
+                termuxSetupNeeded.value = true
+                onDone(false)
+                return@launch
+            }
+            gitBusy.value = true
+            gitMsg.value = "正在安装 git…"
             val r = candy.ide.git.GitManager.installGit(ctx)
             gitReady.value = r.ok
             gitBusy.value = false
@@ -1381,6 +1396,35 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun nextCommitName(): String = "第 " + Math.max(1, gitCommitCount + 1) + " 次推送"
+
+    /** 为当前工程初始化 git 仓库（git init + 身份 + 远程） */
+    fun gitInitProject(ctx: android.content.Context, onDone: (String) -> Unit = {}) {
+        val proj = currentProject.value ?: run { onDone("未打开工程"); return }
+        gitBusy.value = true
+        gitMsg.value = "初始化 git 仓库…"
+        viewModelScope.launch {
+            try {
+                val path = candy.ide.git.GitManager.realPath(proj)
+                    ?: run { onDone("无法确定工程的真实路径"); return@launch }
+                val r = candy.ide.git.GitManager.initRepo(ctx, proj, "初始化工程 " + proj.name)
+                if (r.ok && candy.ide.data.Settings.gitUserName.isNotBlank()) {
+                    candy.ide.git.GitManager.configIdentity(
+                        ctx, path,
+                        candy.ide.data.Settings.gitUserName,
+                        candy.ide.data.Settings.gitUserEmail,
+                    )
+                }
+                if (r.ok && projectRemote.value.isNotBlank()) {
+                    candy.ide.git.GitManager.setRemote(ctx, path, projectRemote.value)
+                }
+                gitResult.value = if (r.ok) "git 仓库已初始化" else "初始化失败：" + r.output.take(300)
+                onDone(gitResult.value ?: "")
+            } finally {
+                gitBusy.value = false
+                gitMsg.value = ""
+            }
+        }
+    }
 
     /** 推送：提交到本地（短按）/ 推送云端（长按） */
     fun gitCommit(ctx: android.content.Context, message: String, pushToRemote: Boolean, onDone: (String) -> Unit = {}) {

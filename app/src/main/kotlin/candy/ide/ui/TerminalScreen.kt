@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -79,7 +80,7 @@ data class TermLine(val text: String, val kind: Kind = Kind.OUT) {
  * 仿终端界面：黑底绿字 + 提示符输入行。
  * 实际通道由 TerminalBridge 决定（Shizuku 真执行 / Termux 意图降级）。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun TerminalScreen(vm: CandyViewModel) {
     val ctx = LocalContext.current
@@ -95,7 +96,7 @@ fun TerminalScreen(vm: CandyViewModel) {
 
     LaunchedEffect(Unit) {
         val proj = vm.currentProject.value?.name
-        lines.add(TermLine("CandyIDE 终端 — shell 通道：Shizuku 优先，Termux 意图降级", TermLine.Kind.SYS))
+        lines.add(TermLine("CandyIDE 终端 — 双击任意行可复制", TermLine.Kind.SYS))
         lines.add(TermLine(
             when {
                 TerminalBridge.isTermuxInstalled(ctx) -> "Termux：已安装；Shizuku：" + shizukuHint()
@@ -147,8 +148,10 @@ fun TerminalScreen(vm: CandyViewModel) {
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 items(lines) { line ->
+                    // 可选中文本（双击整行复制到剪贴板）
+                    var showCopied by remember { mutableStateOf(false) }
                     Text(
-                        line.text,
+                        text = line.text,
                         color = when (line.kind) {
                             TermLine.Kind.CMD -> TermAccent
                             TermLine.Kind.OUT -> TermFg
@@ -157,8 +160,23 @@ fun TerminalScreen(vm: CandyViewModel) {
                         },
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp).combinedClickable(
+                            onClick = {},
+                            onDoubleClick = {
+                                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("candy", line.text))
+                                showCopied = true
+                            },
+                        ),
                     )
+                    if (showCopied) {
+                        LaunchedEffect(showCopied) {
+                            kotlinx.coroutines.delay(1200)
+                            showCopied = false
+                        }
+                        Text("已复制", color = TermDim, fontSize = 10.sp)
+                    }
                 }
                 // 输入行：跟在内容流后面（不是固定在最底下）
                 item {

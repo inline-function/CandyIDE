@@ -24,27 +24,28 @@ object TerminalBridge {
 
     data class Result(val channel: Channel, val output: String)
 
-    /** 执行一条命令：优先 Shizuku，其次 Termux，都不行返回提示。[cwd] 指定工作目录 */
-    fun exec(ctx: Context, cmd: String, cwd: String? = null): Result {
+    /** 执行一条命令：优先 Shizuku，其次 Termux，都不行返回提示。[cwd] 指定工作目录
+     *  [forceTermux] = true 时一律走 Termux（agent 的 shell 用：Shizuku 的 shell 环境没有 git 等工具链） */
+    fun exec(ctx: Context, cmd: String, cwd: String? = null, forceTermux: Boolean = false): Result {
         val trimmed = cmd.trim()
         if (trimmed.isEmpty()) return Result(Channel.NONE, "")
         // git 命令必须走 Termux：Shizuku 的 shell 用户被 SELinux 挡在 /data/data/com.termux 之外，
         // PATH 里也没有 git，Shizuku 通道跑 git 必定 "command not found"
         val isGitCmd = trimmed.startsWith("git ") || trimmed == "git" || trimmed.startsWith("git\t")
-        if (!isGitCmd && ShizukuShell.exec(arrayOf("sh", "-c", "echo ok")) != null) {
+        if (forceTermux || isGitCmd) {
+            // 强制 Termux / git：先探 RUN_COMMAND 通道，没通直接给开启提示（避免空等轮询像卡住）
+            if (!candy.ide.git.GitManager.runCommandReadyBlocking(ctx)) {
+                return Result(Channel.TERMUX_UNSUITABLE,
+                    "Termux 通道未就绪（未授权、未允许外部应用调用，或 Termux 没在运行）\n去开启：打开 Termux 一次；或在 Termux 里执行：\necho 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings")
+            }
+            val via = runGitViaTermux(ctx, trimmed, cwd)
+            if (via != null) return via
+        }
+        if (!forceTermux && ShizukuShell.exec(arrayOf("sh", "-c", "echo ok")) != null) {
             // 1) Shizuku
             val full = if (cwd != null) "cd \"" + cwd + "\" && " + trimmed else trimmed
             val out = ShizukuShell.exec(arrayOf("sh", "-c", full)) ?: "（无输出）"
             return Result(Channel.SHIZUKU, out)
-        }
-        if (isGitCmd) {
-            // git 必须走 Termux；先探 RUN_COMMAND 通道，没通直接给开启提示（避免空等轮询像卡住）
-            if (!candy.ide.git.GitManager.runCommandReadyBlocking(ctx)) {
-                return Result(Channel.TERMUX_UNSUITABLE,
-                    "git 需要 Termux 允许外部应用调用（Termux 默认不开）\n去开启：设置 → git 协同 → 一键开启\n或在 Termux 里执行一次：\necho 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings")
-            }
-            val via = runGitViaTermux(ctx, trimmed, cwd)
-            if (via != null) return via
         }
         // 2) Termux RUN_COMMAND：把命令包成脚本，输出重定向到中转文件
         if (isTermuxInstalled(ctx)) {

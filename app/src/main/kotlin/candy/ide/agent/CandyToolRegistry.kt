@@ -55,33 +55,25 @@ class CandyToolRegistry(private val ctx: Context) {
 
             val cmd = args["command"] as? String
             if (cmd.isNullOrBlank()) return@to "参数 command 必填"
-            val trimmed = cmd.trim()
-            val isGit = trimmed.startsWith("git ") || trimmed == "git" || trimmed.startsWith("git\t")
-            if (isGit) {
-                // git 只在 Termux 里（Shizuku 的 shell 用户被 SELinux 挡在 Termux 数据目录外、PATH 也无 git）
-                // 复用终端通道：git 命令自动走 Termux RUN_COMMAND
-                val proj = scope()
-                val cwd = if (proj == AgentScope.PROJECT) currentProjectDir?.let { candy.ide.git.GitManager.realPath(it) } else null
-                val res = candy.ide.terminal.TerminalBridge.exec(ctx, cmd, cwd)
-                return@to when (res.channel) {
-                    candy.ide.terminal.TerminalBridge.Channel.SHIZUKU -> res.output.ifBlank { "（执行完毕，无输出）" }
-                    candy.ide.terminal.TerminalBridge.Channel.TERMUX -> {
-                        // 轮询中转输出（最多 20s）
-                        var waited = 0
-                        var relayOut: String? = null
-                        while (waited < 20000) {
-                            Thread.sleep(400); waited += 400
-                            relayOut = candy.ide.terminal.TerminalBridge.readRelay()
-                            if (relayOut != null) break
-                        }
-                        relayOut?.ifBlank { "（执行完毕，无输出）" } ?: "Termux 命令超时未返回"
+            // agent 的 shell 一律走 Termux（RUN_COMMAND）：Shizuku 的 shell 环境没有 git 等完整工具链，
+            // 且其用户被 SELinux 挡在 /data/data/com.termux 之外
+            val proj0 = scope()
+            val cwd = if (proj0 == AgentScope.PROJECT) currentProjectDir?.let { candy.ide.git.GitManager.realPath(it) } else null
+            val res = candy.ide.terminal.TerminalBridge.exec(ctx, cmd, cwd, forceTermux = true)
+            return@to when (res.channel) {
+                candy.ide.terminal.TerminalBridge.Channel.TERMUX -> {
+                    // 轮询中转输出（最多 20s）
+                    var waited = 0
+                    var relayOut: String? = null
+                    while (waited < 20000) {
+                        Thread.sleep(400); waited += 400
+                        relayOut = candy.ide.terminal.TerminalBridge.readRelay()
+                        if (relayOut != null) break
                     }
-                    else -> "git 执行失败：" + res.output
+                    relayOut?.ifBlank { "（执行完毕，无输出）" } ?: "Termux 命令超时未返回（Termux 没在运行？）"
                 }
+                else -> "shell 执行失败：" + res.output
             }
-            // 非 git：走 Shizuku（若已授权）；否则提示
-            val out = candy.ide.jsapk.ShizukuShell.exec(arrayOf("sh", "-c", cmd))
-            out ?: "Shizuku 未连接/未授权，无法执行 shell。请在设置里连接 Shizuku。"
         },
         "list_diagnostics" to { _ ->
             val diags = diagnostics
@@ -226,7 +218,7 @@ class CandyToolRegistry(private val ctx: Context) {
         val contentProps = org.json.JSONObject().put("content", org.json.JSONObject().put("type", "string").put("description", "要写入的完整文件内容"))
         val arr = org.json.JSONArray()
         arr.put(fn("read_current_file", "读取编辑器当前打开的文件全文", noProps))
-        arr.put(fn("run_shell", "执行 shell 命令并返回输出（Shizuku 通道；git 命令自动走 Termux）", cmdProps, listOf("command")))
+        arr.put(fn("run_shell", "执行 shell 命令并返回输出（经 Termux 通道：完整 Linux 工具链，含 git/ls/cat 等）", cmdProps, listOf("command")))
         arr.put(fn("list_project_files", "列出当前工程的文件清单", noProps))
         arr.put(fn("project_info", "获取当前工程的信息：真实文件路径、工程类型、文件数量、当前打开的文件。开始任何工程操作前先调用", noProps))
         arr.put(fn("workspace_info", "获取工作区（IDE 目录）的真实绝对路径与工程清单。需要在终端里跑命令（git/打包等）时用它拿到真实路径", noProps))

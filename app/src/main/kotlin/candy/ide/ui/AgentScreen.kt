@@ -1,6 +1,7 @@
 package candy.ide.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -385,9 +386,11 @@ private fun InfoLine(name: String, value: String) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ChatBubble(msg: ChatMessage, onPickOption: (String) -> Unit) {
     val isUser = msg.role == ChatMessage.Role.USER
+    val bubbleCtx = androidx.compose.ui.platform.LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
@@ -399,7 +402,20 @@ private fun ChatBubble(msg: ChatMessage, onPickOption: (String) -> Unit) {
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(0.88f),
         ) {
-            Column(Modifier.padding(10.dp)) {
+            Column(
+            modifier = Modifier.padding(10.dp).combinedClickable(
+                enabled = true,
+                onClick = {},
+                onDoubleClick = {
+                    val cm = bubbleCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("candy", msg.text))
+                    android.widget.Toast.makeText(
+                        bubbleCtx, "已复制", android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            ),
+        ) {
                 if (msg.role != ChatMessage.Role.TOOL) {
                     Text(
                         when (msg.role) {

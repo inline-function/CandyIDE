@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -646,47 +647,9 @@ fun SettingsScreen(vm: CandyViewModel) {
             }
             item { SectionTitle("关于") }
             item { SettingsRow("CandyIDE", "v" + versionName) }
-            item { SettingsRow("开源组件", "SoraEditor · commonmark-java · ColorPicker · Shizuku API（点击下方各条目进入项目地址）") }
-            item {
-                Surface(color = CandySurface, onClick = {
-                    runCatching {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/inline-function/CandyIDE"),
-                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ctx.startActivity(intent)
-                    }.onFailure { Toast.makeText(ctx, "没有可打开链接的应用", Toast.LENGTH_SHORT).show() }
-                }) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("项目地址 · CandyIDE（本 IDE）", color = CandyText)
-                            Spacer(Modifier.size(2.dp))
-                            Text("github.com/inline-function/CandyIDE", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandyTextDim)
-                    }
-                }
-            }
-            item {
-                Surface(color = CandySurface, onClick = {
-                    runCatching {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/inline-function/Sublimation"),
-                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ctx.startActivity(intent)
-                    }.onFailure { Toast.makeText(ctx, "没有可打开链接的应用", Toast.LENGTH_SHORT).show() }
-                }) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("项目地址", color = CandyText)
-                            Spacer(Modifier.size(2.dp))
-                            Text("github.com/inline-function/Sublimation", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = CandySecondary)
-                    }
-                }
-            }
+            item { EntryRow("项目地址", "CandyIDE · Sublimation") { vm.goProjectLinks() } }
+            item { EntryRow("开源组件", "SoraEditor · commonmark-java · ColorPicker · Shizuku") { vm.goOpenSource() } }
+
             item {
                 Surface(color = CandySurface, onClick = { vm.goDevelopers() }) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -755,8 +718,9 @@ fun SettingsScreen(vm: CandyViewModel) {
                             // 没授权：提示去「Shizuku 权限」分类请求 Termux 授权
                             Toast.makeText(ctx, "请先请求 Termux 授权（设置 → Shizuku 权限 → Termux 授权），授权后再装 git", Toast.LENGTH_LONG).show()
                         }
-                        !vm.runCmdReady.value -> vm.termuxSetupNeeded.value = true
-                        else -> pendingInstallGit = true
+                        else -> vm.installGit(ctx) { ok ->
+                            if (!ok) Toast.makeText(ctx, "未安装成功，可能 Termux 没在运行", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -765,9 +729,12 @@ fun SettingsScreen(vm: CandyViewModel) {
                             Spacer(Modifier.size(2.dp))
                             Text(
                                 when {
-                                    vm.gitReady.value -> "已安装 ✓（点击再装一次）"
+                                    vm.gitReady.value -> "已安装 ✓"
                                     !vm.termuxInstalled.value -> "需要先安装 Termux"
-                                    !vm.runCmdReady.value -> "需要先开启 Termux 外部调用"
+                                    !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx) ->
+                                        "需要先请求 Termux 授权（本页 Shizuku 分类里）"
+                                    !vm.runCmdReady.value ->
+                                        "已授权 ✓，但 Termux 未在运行或未允许外部调用（点击重试，或先打开 Termux 一次）"
                                     else -> "通过 Termux 安装（pkg install git）"
                                 },
                                 color = CandyTextDim, style = MaterialTheme.typography.bodySmall,
@@ -947,6 +914,106 @@ fun SettingsScreen(vm: CandyViewModel) {
             },
             dismissButton = { TextButton(onClick = { pendingDeleteConfirm = false }) { Text("取消") } },
         )
+    }
+}
+
+data class LinkItem(val name: String, val url: String)
+
+/** 通用链接列表页（项目地址 / 开源组件） */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun LinkListScreen(vm: candy.ide.vm.CandyViewModel, title: String, links: List<LinkItem>) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.activity.compose.BackHandler { vm.screen.value = Screen.Settings }
+    androidx.compose.material3.Scaffold(
+        containerColor = candy.ide.ui.theme.CandyBg,
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { androidx.compose.material3.Text(title, color = candy.ide.ui.theme.CandyText) },
+                navigationIcon = {
+                    androidx.compose.material3.IconButton(onClick = { vm.screen.value = Screen.Settings }) {
+                        androidx.compose.material3.Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = candy.ide.ui.theme.CandyTextDim,
+                        )
+                    }
+                },
+            )
+        },
+    ) { pad ->
+        androidx.compose.foundation.layout.Column(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxSize()
+                .padding(pad)
+                .padding(16.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        ) {
+            links.forEach { l ->
+                androidx.compose.material3.Surface(
+                    color = candy.ide.ui.theme.CandySurface,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                    onClick = {
+                        runCatching {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(l.url),
+                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            ctx.startActivity(intent)
+                        }.onFailure {
+                            android.widget.Toast.makeText(ctx, "没有可打开链接的应用", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                ) {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = androidx.compose.ui.Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(1f)) {
+                            androidx.compose.material3.Text(l.name, color = candy.ide.ui.theme.CandyText, fontSize = 15.sp)
+                            androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.size(2.dp))
+                            androidx.compose.material3.Text(
+                                l.url.removePrefix("https://"),
+                                color = candy.ide.ui.theme.CandyTextDim,
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        androidx.compose.material3.Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = candy.ide.ui.theme.CandyTextDim,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 设置条目（带箭头，点进入子页） */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun EntryRow(title: String, subtitle: String, onClick: () -> Unit) {
+    androidx.compose.material3.Surface(color = candy.ide.ui.theme.CandySurface, onClick = onClick) {
+        androidx.compose.foundation.layout.Row(
+            modifier = androidx.compose.ui.Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(1f)) {
+                androidx.compose.material3.Text(title, color = candy.ide.ui.theme.CandyText)
+                androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.size(2.dp))
+                androidx.compose.material3.Text(
+                    subtitle,
+                    color = candy.ide.ui.theme.CandyTextDim,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                )
+            }
+            androidx.compose.material3.Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = candy.ide.ui.theme.CandyTextDim,
+            )
+        }
     }
 }
 

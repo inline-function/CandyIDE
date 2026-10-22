@@ -840,7 +840,7 @@ fun EditorScreen(vm: CandyViewModel) {
                 exit = slideOutHorizontally(tween(220)) { fullWidth -> fullWidth }
             ) {
                 val topPad = with(androidx.compose.ui.platform.LocalDensity.current) { topBarHeightPx.toDp() }
-                Surface(color = CandyBg, modifier = Modifier.fillMaxHeight().fillMaxWidth(0.85f)) {
+                Surface(color = CandyBg, modifier = Modifier.fillMaxHeight().fillMaxWidth(0.85f).padding(top = topPad)) {
                     GitPanel(vm)
                 }
             }

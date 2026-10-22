@@ -58,6 +58,12 @@ fun GitPanel(vm: CandyViewModel) {
     var remoteText by remember { mutableStateOf(vm.projectRemote.value) }
     LaunchedEffect(vm.projectRemote.value) { remoteText = vm.projectRemote.value }
 
+    val proj = vm.currentProject.value
+    var repoReady by remember { mutableStateOf(proj?.let { candy.ide.git.GitManager.hasRepo(it) } ?: false) }
+    LaunchedEffect(vm.gitResult.value, vm.currentProject.value?.key) {
+        proj?.let { repoReady = candy.ide.git.GitManager.hasRepo(it) }
+    }
+
     Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -71,6 +77,22 @@ fun GitPanel(vm: CandyViewModel) {
                         CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
                         Spacer(Modifier.size(6.dp))
                         Text(vm.gitMsg.value.ifBlank { "处理中…" }, color = CandyTextDim, fontSize = 12.sp)
+                    }
+                }
+            }
+            // 本工程还没有 git 仓库：先初始化（否则推送/丢弃都会报错）
+            if (proj != null && !repoReady) {
+                item {
+                    Surface(color = CandySurface, shape = RoundedCornerShape(10.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                            Text("尚未初始化 git 仓库", color = CandyPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.size(4.dp))
+                            Text("本工程还没有 .git，推送/丢弃会报错。先初始化（git init + 身份 + 远程）。", color = CandyTextDim, fontSize = 12.sp)
+                            Spacer(Modifier.size(8.dp))
+                            TextButton(onClick = {
+                                vm.gitInitProject(ctx) { }
+                            }) { Text("初始化 git 仓库") }
+                        }
                     }
                 }
             }
