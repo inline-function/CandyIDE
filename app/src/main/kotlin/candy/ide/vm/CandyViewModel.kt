@@ -2018,14 +2018,19 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         return false
     }
 
-    fun quickFixes(): List<QuickFix> {
+    /** 快速修正：按光标处的诊断取 codeActionsFor（诊断驱动：全角符号、纯调非纯等） */
+    fun quickFixes(line: Int, col: Int): List<QuickFix> {
         val f = currentFile.value ?: return emptyList()
         val name = f.name
         if (!name.endsWith(".subl") && !name.endsWith(".subs")) return emptyList()
         val analysis = analysis() ?: return emptyList()
         return runCatching {
             analysis.updateDocument(name, loadTextFor(f))
-            analysis.codeActions(name).map { a ->
+            val range = if (line < 0) null else sugared.functor.lsp.Range(
+                sugared.functor.lsp.Position(line, col),
+                sugared.functor.lsp.Position(line, col),
+            )
+            analysis.codeActionsFor(name, range).map { a ->
                 QuickFix(
                     a.title,
                     a.edit?.changes?.get(name)?.map { it.range to it.newText } ?: emptyList(),

@@ -149,7 +149,7 @@ fun EditorScreen(vm: CandyViewModel) {
     var cursorLine by remember { mutableIntStateOf(-1) }
     var cursorCol by remember { mutableIntStateOf(-1) }
     var editorSize by remember { mutableStateOf(IntSize.Zero) }
-    var fixPopup by remember { mutableStateOf(false) }
+    var fixPopupAt by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     // 外部修改检测：文件签（黄条）—— 文件被外部改动时提示同步或覆盖
     var externalChange by remember { mutableStateOf<candy.ide.fs.CandyPath?>(null) }
     // 记录每个打开文件最近一次我们这边写盘/载入时的 mtime，用于判断外部改动
@@ -776,7 +776,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                                                     val col = d.char.coerceIn(0, content.getColumnCount(line))
                                                                     ed2.setSelection(line, col, true)
                                                                 }
-                                                                fixPopup = true
+                                                                fixPopupAt = Pair(d.line, d.char)
                                                             },
                                                         ),
                                                     verticalAlignment = Alignment.CenterVertically,
@@ -968,14 +968,14 @@ fun EditorScreen(vm: CandyViewModel) {
         )
     }
     // 灯泡 → 快速修正列表（LSP codeActions）
-    if (fixPopup) {
-        val fixes = remember { runCatching { vm.quickFixes() }.getOrDefault(emptyList()) }
+    if (fixPopupAt != null) {
+        val fixes = remember(fixPopupAt) { runCatching { vm.quickFixes(fixPopupAt!!.first, fixPopupAt!!.second) }.getOrDefault(emptyList()) }
         AlertDialog(
-            onDismissRequest = { fixPopup = false },
+            onDismissRequest = { fixPopupAt = null },
             title = { Text("快速修正") },
             text = {
                 if (fixes.isEmpty()) {
-                    Text("当前没有可用的快速修正\n（语言服务的 codeActions 目前只支持全角符号替换）", color = CandyTextDim)
+                    Text("当前没有可用的快速修正\n（codeActions 覆盖：全角符号替换、纯调用加 unchecked/@impure、缺 @async、多传实参、impl 补存根、声明加 @mut —— 视光标处的诊断而定）", color = CandyTextDim)
                 } else {
                     Column {
                         fixes.forEach { fix ->
@@ -996,7 +996,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                                 goToDefinition(vm, ed, cur.leftLine, cur.leftColumn)
                                         }
                                         vm.mdLogUser("**[快捷操作]** " + fix.title)
-                                        fixPopup = false
+                                        fixPopupAt = null
                                         return@TextButton
                                     }
                                     if (ed != null) {
@@ -1013,7 +1013,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                         vm.mdLogUser("**[快速修正]** " + fix.title)
                                         runCatching { vm.saveCurrent(content.toString()) }
                                     }
-                                    fixPopup = false
+                                    fixPopupAt = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text(fix.title, color = CandyText) }
@@ -1204,6 +1204,12 @@ private fun explainDiag(message: String): String {
         "想要" in m && "个实参" in m -> "调用函数时传入的参数个数和声明不一致。检查函数签名，或补上缺少的实参。"
         "与形参" in m && "不符" in m -> "实参的类型和函数声明要求的形式参数类型对不上。"
         "未定义" in m || "未绑定" in m -> "用到的名字在当前作用域里找不到定义：检查拼写，或确认它已经在这份文件/工程里声明。"
+        "纯作用域内调用非纯函数" in m -> "这个函数被声明为纯（pure），但里面调用了会做副作用的函数。长按这条诊断可以快速修正：在调用前加 unchecked（临时豁免检查），或把当前函数标记为 @impure。"
+        "需 @async 上下文" in m -> "这是挂起操作，只有在标了 @async 的函数里才能用。长按这条诊断可以一键给所在函数加上 @async 注解。"
+        "是不可变的" in m -> "变量声明时没加 @mut，所以不能重新赋值。改声明为 `var x : @mut T`，或改用可变容器。长按可快速把声明改成可变。"
+        "少了方法" in m -> "类型类（class）里声明的方法，impl 实现里没写全。长按可以一键补上缺失方法的存根，再把体填出来。"
+        "类型不匹配" in m -> "两边的类型对不上：看消息里期望的类型和实际的类型，检查变量声明或函数返回类型。"
+        "不是函数" in m -> "你在一个不是函数的值后面跟了括号调用。检查这个名字是什么类型。"
         "是异步调用" in m -> "这个调用会挂起，只在标注了 @async 的函数里才能直接使用。"
         "推导为" in m -> "这是类型推导注记：编译器替没有写类型标注的变量补上了推导结果。不是错误。"
         "注入自然命题" in m -> "自然数性质的自动注入提示，不是错误。"
