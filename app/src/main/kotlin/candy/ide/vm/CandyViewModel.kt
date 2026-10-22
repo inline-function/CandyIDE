@@ -1718,6 +1718,129 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 文件树/任意 apk：包名未知时不传，成功后「打开」走包名兜底失败提示 */
     fun installApk(file: CandyPath) = installPkg(file)
+    // ───────── LiteASDK 工具链：subl → APK 端上构建的精简安卓工具链 ─────────
+    fun liteaSdkDir(): File = File(Engine.root(getApplication()), "litea-sdk")
+    fun liteaSdkReady(): Boolean = runCatching {
+        val d = liteaSdkDir()
+        File(d, "bin/aapt2").isFile && File(d, "lib/android.jar").isFile && File(d, "build").isDirectory
+    }.getOrDefault(false)
+    val liteaImporting = mutableStateOf(false)
+    val liteaImportMsg = mutableStateOf<String?>(null)
+    /** 从本地路径导入（SAF 被厂商文件管理器劫持时的备选入口，如 /sdcard/Download/LiteASDK.zip） */
+    fun importLiteASdkFromPath(path: String) {
+        if (liteaImporting.value) return
+        val src = java.io.File(path)
+        if (!src.isFile) {
+            liteaImportMsg.value = "文件不存在：" + path
+            mdLog("**[工具链导入失败]** 文件不存在：" + path)
+            return
+        }
+        runCatching { importLiteASdkLocal(src) }
+            .onFailure {
+                liteaImportMsg.value = "导入失败：" + (it.message ?: it.javaClass.simpleName)
+                mdLog("**[工具链导入失败]** " + (it.message ?: it.javaClass.simpleName))
+            }
+    }
+
+    /** 解压本地 zip 到 files/candy/litea-sdk；Uri 版与此共用本体 */
+    private fun importLiteASdkLocal(src: java.io.File) {
+        liteaImporting.value = true
+        io.execute {
+            val target = liteaSdkDir()
+            runCatching {
+                target.deleteRecursively()
+                target.mkdirs()
+                val base = target.canonicalPath
+                var entries = 0
+                java.util.zip.ZipInputStream(java.io.BufferedInputStream(src.inputStream())).use { zis ->
+                    var ze = zis.nextEntry
+                    while (ze != null) {
+                        if (!ze.isDirectory) {
+                            val out = File(target, ze.name)
+                            if (!out.canonicalPath.startsWith(base)) {
+                                zis.closeEntry(); ze = zis.nextEntry; continue
+                            }
+                            out.parentFile?.mkdirs()
+                            out.outputStream().use { o -> zis.copyTo(o) }
+                            if (ze.name.startsWith("bin/") ||
+                                (ze.name.startsWith("build/") && ze.name.endsWith(".sh"))) {
+                                out.setExecutable(true, false)
+                            }
+                            entries++
+                        }
+                        zis.closeEntry()
+                        ze = zis.nextEntry
+                    }
+                }
+                val ok = liteaSdkReady()
+                val msg = if (ok) "LiteASDK 已就位（" + entries + " 个文件）：" + target.absolutePath
+                    else "解压完成但缺少关键文件（bin/aapt2、lib/android.jar、build/）。请确认是 LiteASDK 官方分发包"
+                main.post {
+                    liteaImportMsg.value = msg
+                    liteaImporting.value = false
+                    mdLogUser("**[工具链]** " + msg)
+                }
+            }.onFailure { e ->
+                main.post {
+                    liteaImportMsg.value = "导入失败：" + (e.message ?: e.javaClass.simpleName)
+                    liteaImporting.value = false
+                    mdLog("**[工具链导入失败]** " + (e.message ?: e.javaClass.simpleName))
+                }
+            }
+        }
+    }
+
+    fun importLiteASdk(uri: android.net.Uri) {
+        if (liteaImporting.value) return
+        liteaImporting.value = true
+        io.execute {
+            val target = liteaSdkDir()
+            runCatching {
+                target.deleteRecursively()
+                target.mkdirs()
+                val base = target.canonicalPath
+                var entries = 0
+                val app = getApplication<android.app.Application>()
+                app.contentResolver.openInputStream(uri).use { ins ->
+                    java.util.zip.ZipInputStream(java.io.BufferedInputStream(ins)).use { zis ->
+                        var ze = zis.nextEntry
+                        while (ze != null) {
+                            if (!ze.isDirectory) {
+                                val out = File(target, ze.name)
+                                if (!out.canonicalPath.startsWith(base)) {
+                                    zis.closeEntry(); ze = zis.nextEntry; continue
+                                }
+                                out.parentFile?.mkdirs()
+                                out.outputStream().use { o -> zis.copyTo(o) }
+                                if (ze.name.startsWith("bin/") ||
+                                    (ze.name.startsWith("build/") && ze.name.endsWith(".sh"))) {
+                                    out.setExecutable(true, false)
+                                }
+                                entries++
+                            }
+                            zis.closeEntry()
+                            ze = zis.nextEntry
+                        }
+                    }
+                }
+                val ok = liteaSdkReady()
+                val msg = if (ok) "LiteASDK 已就位（" + entries + " 个文件）：" + target.absolutePath
+                    else "解压完成但缺少关键文件（bin/aapt2、lib/android.jar、build/）。请确认 zip 是 LiteASDK 官方分发包"
+                main.post {
+                    liteaImportMsg.value = msg
+                    liteaImporting.value = false
+                    mdLogUser("**[工具链]** " + msg)
+                }
+            }.onFailure { e ->
+                main.post {
+                    liteaImportMsg.value = "导入失败：" + (e.message ?: e.javaClass.simpleName)
+                    liteaImporting.value = false
+                    mdLog("**[工具链导入失败]** " + (e.message ?: e.javaClass.simpleName))
+                }
+            }
+        }
+    }
+
 
     /** 用其它应用打开（FileProvider 授权读） */
     fun openExternal(ctx: android.content.Context, file: CandyPath) {
