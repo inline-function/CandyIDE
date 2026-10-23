@@ -2322,6 +2322,38 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 虚拟桥接环境的视图树状态 */
     val virtState = mutableStateOf<candy.ide.ui.ComposePreviewState?>(null)
+    // 布局预览独立全屏页（像 AI 助手页那样单开一页）：编辑器里点「全屏」时挂上
+    val composePreviewFull = mutableStateOf<candy.ide.ui.ComposePreviewState?>(null)
+    /** 进入预览全屏页（树来自当前编辑器的 @composable 函数） */
+    fun openComposePreviewFull(pv: candy.ide.ui.ComposePreviewState) {
+        composePreviewFull.value = pv
+        screen.value = Screen.Preview
+    }
+    /** 预览全屏页写回源码：保留函数签名行（含 @composable），替换函数体；编辑器返回后按新正文重载 */
+    fun applyPreviewTree(treeJson: String) {
+        val pv = composePreviewFull.value ?: return
+        val f = currentFile.value ?: return
+        runCatching {
+            val tree = org.json.JSONObject(treeJson)
+            val content = loadTextFor(f)
+            if (content.isEmpty()) return
+            val ls = content.split("\n").toMutableList()
+            var sig = (pv.start - 1).coerceIn(0, ls.size - 1)
+            while (sig < ls.size && !ls[sig].contains("{")) sig++
+            if (sig >= ls.size) return
+            val endIdx = (pv.end - 1).coerceIn(sig, ls.size - 1)
+            val head = ls.subList(0, sig + 1)
+            val tail = if (endIdx + 1 < ls.size) ls.subList(endIdx + 1, ls.size) else emptyList()
+            val out = ArrayList<String>(head)
+            out += candy.ide.ui.PreviewCodeGen.bodyLines(tree)
+            out += "}"
+            out += tail
+            val newText = out.joinToString("\n")
+            saveCurrent(newText)
+            // 编辑器立即以新正文重载（回到编辑器页就能看到写回的函数体）
+            forceReloadNonce.intValue++
+        }
+    }
 
     /** 灯泡：当前文件可用的快速修正（LSP codeActions） */
     data class QuickFix(

@@ -41,7 +41,7 @@ import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
 import candy.ide.vm.CandyViewModel
 
-enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource, Stdlib, Virt }
+enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource, Stdlib, Virt, Preview }
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
@@ -294,6 +294,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
         Screen.Terminal -> TerminalScreen(vm)
         Screen.Agent -> AgentScreen(vm)
         Screen.Virt -> candy.ide.ui.VirtScreen(vm)
+    Screen.Preview -> candy.ide.ui.PreviewScreen(vm)
         Screen.Git -> GitScreen(vm)
         Screen.ProjectLinks -> LinkListScreen(
             vm = vm,

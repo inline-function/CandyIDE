@@ -150,8 +150,7 @@ fun EditorScreen(vm: CandyViewModel) {
     // 预览悬浮窗：顶栏拖动的位移（顶栏 onDrag 累加）
     var previewOffset by remember { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
     val previewScope = androidx.compose.runtime.rememberCoroutineScope()
-    var previewFullscreen by remember { mutableStateOf(false) }
-    // 编辑节拍：onTextChange 计数，防抖用于预览刷新
+        // 编辑节拍：onTextChange 计数，防抖用于预览刷新
     var textEditTick by remember { mutableIntStateOf(0) }
     var renameReq by remember { mutableStateOf<RenameRequest?>(null) }
     // 光标位置（SelectionChangeEvent 回调写入）：供诊断悬浮窗定位
@@ -166,7 +165,7 @@ fun EditorScreen(vm: CandyViewModel) {
     var topBarHeightPx by remember { mutableIntStateOf(0) }
 
     // 全屏预览时返回键 = 退出全屏（像 AI 助手页那样）；否则退编辑器
-    BackHandler { if (previewFullscreen) previewFullscreen = false else vm.backFromEditor() }
+    BackHandler { vm.backFromEditor() }
 
     // 外部修改检测：活动恢复 / agent 回复完毕 / 切换当前文件时，比对磁盘 mtime
     LaunchedEffect(vm.resumeNonce.intValue, safe) {
@@ -637,47 +636,24 @@ fun EditorScreen(vm: CandyViewModel) {
                             Surface(
                                 modifier = Modifier
                                     .align(androidx.compose.ui.Alignment.TopEnd)
-                                    .then(
-                                        if (previewFullscreen) Modifier.fillMaxSize()
-                                        else Modifier.fillMaxWidth(0.42f)
-                                    )
-                                    .heightIn(max = if (previewFullscreen) 4000.dp else 300.dp)
-                                    .offset { if (previewFullscreen) androidx.compose.ui.unit.IntOffset.Zero else previewOffset }
-                                    .then(if (previewFullscreen) Modifier else Modifier.padding(end = 8.dp, top = 4.dp)),
-                                shape = if (previewFullscreen) androidx.compose.foundation.shape.RoundedCornerShape(0.dp)
-                                        else androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                    .fillMaxWidth(0.42f)
+                                    .heightIn(max = 320.dp)
+                                    .offset { previewOffset }
+                                    .padding(end = 8.dp, top = 4.dp),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
                                 color = candy.ide.ui.theme.CandySurface,
-                                tonalElevation = if (previewFullscreen) 0.dp else 4.dp,
-                                shadowElevation = if (previewFullscreen) 0.dp else 10.dp,
+                                tonalElevation = 4.dp,
+                                shadowElevation = 10.dp,
                             ) {
                                 candy.ide.ui.ComposePreviewPanel(
                                     state = pv,
-                                    fullscreen = previewFullscreen,
-                                    onToggleFullscreen = { previewFullscreen = !previewFullscreen },
-                                    onClose = { composePreview = null; previewFullscreen = false; previewOffset = androidx.compose.ui.unit.IntOffset.Zero },
-                                    onApply = { treeJson ->
-                                        // 视图树 → 函数体写回源码：保留签名行（含 @composable），替换体；编辑器可撤销
-                                        runCatching {
-                                            val tree = org.json.JSONObject(treeJson)
-                                            val content = editor?.text?.toString() ?: ""
-                                            if (content.isEmpty()) return@runCatching
-                                            val lines = content.split("\n").toMutableList()
-                                            var sig = (pv.start - 1).coerceIn(0, lines.size - 1)
-                                            while (sig < lines.size && !lines[sig].contains("{")) sig++
-                                            if (sig >= lines.size) return@runCatching
-                                            val endIdx = (pv.end - 1).coerceIn(sig, lines.size - 1)
-                                            val head = lines.subList(0, sig + 1)
-                                            val tail = if (endIdx + 1 < lines.size) lines.subList(endIdx + 1, lines.size) else emptyList()
-                                            val out = ArrayList<String>(head)
-                                            out += candy.ide.ui.PreviewCodeGen.bodyLines(tree)
-                                            out += "}"
-                                            out += tail
-                                            val newText = out.joinToString("\n")
-                                            editor?.text?.replace(0, editor!!.text.length, newText)
-                                        }.onFailure {
-                                            android.widget.Toast.makeText(ctx, "写回失败：" + (it.message ?: ""), android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
+                                    fullscreen = false,
+                                    onToggleFullscreen = { vm.openComposePreviewFull(pv) },   // 像 AI 助手那样单开一页全屏
+                                    onClose = { composePreview = null; previewOffset = androidx.compose.ui.unit.IntOffset.Zero },
+                                    onApply = { _ ->
+                                        // 重生成整段函数体会丢 @mut var 声明与按钮逻辑：
+                                        // 树编辑仅预览内生效，等带源码区间的精确补丁再开启写回
+                                        },
                                     onDrag = { delta -> previewOffset = androidx.compose.ui.unit.IntOffset(previewOffset.x + delta.x, previewOffset.y + delta.y) },
                                 )
                             }
@@ -785,7 +761,6 @@ fun EditorScreen(vm: CandyViewModel) {
                                         LongMenuRow("▶ 预览布局") {
                                             longMenu = null
                                             composePreview = menu.preview
-                                            previewFullscreen = false
                                         }
                                     }
                                     if (word != null) {

@@ -68,7 +68,7 @@ data class ComposePreviewState(
 private fun JSONObject.deepCopy(): JSONObject = JSONObject(this.toString())
 
 /** 按路径取节点（root 自身的路径是空表） */
-private fun nodeAt(root: JSONObject, path: List<Int>): JSONObject? {
+internal fun nodeAt(root: JSONObject, path: List<Int>): JSONObject? {
     var cur: JSONObject = root
     for (i in path) {
         val kids = runCatching { cur.getJSONArray("children") }.getOrNull() ?: return null
@@ -79,7 +79,7 @@ private fun nodeAt(root: JSONObject, path: List<Int>): JSONObject? {
 }
 
 /** 父节点里删除指定下标的孩子 */
-private fun removeChild(parent: JSONObject, index: Int) {
+internal fun removeChild(parent: JSONObject, index: Int) {
     runCatching { parent.getJSONArray("children") }.getOrNull()?.let { arr ->
         if (index in 0 until arr.length()) {
             val kids = (0 until arr.length()).map { arr.getJSONObject(it) }.toMutableList()
@@ -89,24 +89,24 @@ private fun removeChild(parent: JSONObject, index: Int) {
     }
 }
 
-private fun addChild(parent: JSONObject, node: JSONObject) {
+internal fun addChild(parent: JSONObject, node: JSONObject) {
     val arr = runCatching { parent.getJSONArray("children") }.getOrNull() ?: JSONArray().also { parent.put("children", it) }
     arr.put(node)
 }
 
-private fun insertChild(parent: JSONObject, index: Int, node: JSONObject) {
+internal fun insertChild(parent: JSONObject, index: Int, node: JSONObject) {
     val arr = runCatching { parent.getJSONArray("children") }.getOrNull() ?: JSONArray().also { parent.put("children", it) }
     val kids = (0 until arr.length()).map { arr.getJSONObject(it) }.toMutableList()
     kids.add(index.coerceIn(0, kids.size), node)
     parent.put("children", JSONArray(kids))
 }
 
-private fun mkBox(): JSONObject = JSONObject().apply {
+internal fun mkBox(): JSONObject = JSONObject().apply {
     put("name", "Box")
     put("props", JSONObject().apply { put("modifier", "Plain()") })
 }
 
-private fun mkText(t: String): JSONObject = JSONObject().apply {
+internal fun mkText(t: String): JSONObject = JSONObject().apply {
     put("name", "Text")
     put("text", "\"" + t + "\"")
     put("props", JSONObject().apply { put("size", "14") })
@@ -324,7 +324,7 @@ private fun TinyTopBtn(label: String, enabled: Boolean = true, active: Boolean =
 
 /** 树大纲一行：名字 + 摘要，点击选中，按路径高亮 */
 @Composable
-private fun TreeRow(node: JSONObject, path: List<Int>, selPath: List<Int>?, depth: Int, onSelect: (List<Int>) -> Unit) {
+internal fun TreeRow(node: JSONObject, path: List<Int>, selPath: List<Int>?, depth: Int, onSelect: (List<Int>) -> Unit) {
     val name = node.optString("name")
     val txt = node.optString("text").trim('\"')
     val selected = selPath != null && selPath == path
@@ -359,7 +359,7 @@ private fun TreeRow(node: JSONObject, path: List<Int>, selPath: List<Int>?, dept
 
 /** 选中节点的操作条：删除/复制/剪切/粘贴/添加 */
 @Composable
-private fun TreeOpsBar(
+internal fun TreeOpsBar(
     canPaste: Boolean,
     onDelete: () -> Unit,
     onCopy: () -> Unit,
@@ -391,7 +391,7 @@ private fun TinyOpBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
 
 /** 右侧属性面板：对已知属性做行内编辑 */
 @Composable
-private fun PropPanel(
+internal fun PropPanel(
     node: JSONObject,
     fullscreen: Boolean,
     onEdit: () -> Unit,
@@ -475,7 +475,7 @@ private fun PropBoolRow(label: String, value: Boolean, onValue: (Boolean) -> Uni
 /** 单个视图节点 → 缩略 Compose 渲染；children 递归。
  *  点击 = 选中（构建器交互，不运行任何应用逻辑）；选中节点加高亮边框 */
 @Composable
-private fun ViewTreeNode(node: JSONObject, path: List<Int>, selPath: List<Int>?, fullscreen: Boolean, onSelect: (List<Int>) -> Unit) {
+internal fun ViewTreeNode(node: JSONObject, path: List<Int>, selPath: List<Int>?, fullscreen: Boolean, onSelect: (List<Int>) -> Unit) {
     val name = node.optString("name")
     val props = runCatching { node.getJSONObject("props") }.getOrNull()
     val kids = runCatching { node.getJSONArray("children") }.getOrNull()
