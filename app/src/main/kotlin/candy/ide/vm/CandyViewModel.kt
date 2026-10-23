@@ -1117,9 +1117,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                         onInput = { readlnDialog() },
                     )
                 } else if (type == ProjectStore.TYPE_JSAPK) {
-                    mdLog("**[运行]** `" + file.name + "` 安卓工程：注解处理器 → 编译 → JS（原生 APK 打包链路施工中）")
-                    compileAndroidJs(file)
-                    mdLogUser("**[安卓工程]** 编译通过")
+                    // 短按 = 打包安装（与长按打包同链路）：编译 → 壳模板 → 签名 → 安装
+                    mdLog("**[运行]** `" + file.name + "` 安卓工程：处理器 → 编译 → 壳模板注 JS → 签名")
+                    buildApkProject(project!!)
                 } else {
                     mdLog("**[运行]** `" + file.name + "` 脚本直连解释器")
                     Engine.runScript(getApplication(), file,
@@ -1216,15 +1216,28 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_SCRIPT) { buildScriptApkProject(dir); return }
         if (dir.find("jsapk.json")?.isFile() == true) { buildApkIn(dir); return }
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) {
-            // 新安卓工程（无 jsapk.json）：SfA 原生链 —— 先编译（处理器 + 检查），再谈打包
-            runCatching {
-                val entry = dir.walk().firstOrNull { it.isFile() && (it.name == "main.subl" || it.name.endsWith(".subl")) }
+            // 原生安卓工程（无 jsapk.json）：SfA 链 —— 处理器/编译 → 壳模板注 JS → v1 签名 → 安装
+            try {
+                val entry = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
                     ?: throw RuntimeException("工程里没有 .subl 入口")
-                compileAndroidJs(entry)
-            }.onSuccess { js ->
-                mdLogUser("**[安卓工程]** 编译通过，产物 JS `" + js.length + "` 字符；端上 APK 打包链路施工中")
-            }.onFailure { e ->
-                mdLogUser("**[安卓工程编译失败]** " + ((e as? RuntimeException)?.message ?: e.message ?: e.javaClass.simpleName))
+                mdLog("**[打包]** " + entry.name + " 注解处理器 → 编译 → 注进壳模板 → 签名")
+                val js = compileAndroidJs(entry).toByteArray(Charsets.UTF_8)
+                val seed = asciiPackageSeed(dir.name)
+                val apk = candy.ide.jsapk.AndroidApkBuilder.build(getApplication(), js, seed, dir)
+                mdLogUser("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
+                mdLogUser("**[打包]** 包名 functor.sublimation." + seed)
+                main.post { runFailed.value = false }
+                if (Settings.silentInstall) installPkg(apk, "functor.sublimation." + seed)
+                else main.post {
+                    pendingPkg.value = "functor.sublimation." + seed
+                    pendingApk.value = apk
+                }
+            } catch (e: Throwable) {
+                mdLogUser("**[打包失败]** " + ((e as? RuntimeException)?.message ?: e.message ?: e.javaClass.simpleName).substringBefore("\n").take(400))
+                mdLog("**[堆栈]** " + e.stackTraceToString().take(1200).replace("\n", " | "))
+                main.post { runFailed.value = true }
+            } finally {
+                main.post { running.value = false }
             }
             return
         }
@@ -1236,7 +1249,12 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun buildApk() {
-        buildApkProject(currentProject.value ?: return)
+        val dir = currentProject.value ?: return
+        if (running.value) return
+        running.value = true
+        openDrawerTab(1)
+        // 编译 + zip + 签名动辄数秒：务必离线主线程，否则长按按钮会卡死
+        io.execute { buildApkProject(dir) }
     }
 
     /** md 文档工程打包：收集 .md → 阅读器壳注进模板 APK → 签名 → build/app.apk */
@@ -1698,9 +1716,17 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             main.post {
                 installing.value = false
                 if (via) {
-                    installedPkg.value = pkg ?: pendingPkg.value
-                    runFailed.value = false
-                    mdLog("**[安装]** " + msg)
+                    // Shizuku 通道通了不代表装上：返回 'Failure [...]' / 'Error [...]' 就是失败
+                    val ok = !msg.startsWith("Failure") && !msg.startsWith("Error")
+                    if (ok) {
+                        installedPkg.value = pkg ?: pendingPkg.value
+                        runFailed.value = false
+                        mdLog("**[安装]** " + msg)
+                    } else {
+                        installError.value = msg
+                        runFailed.value = true
+                        mdLog("**[安装失败]** " + msg)
+                    }
                 } else {
                     // 无 Shizuku：意图调用系统安装器（ACTION_VIEW apk mime，FileProvider 授权）
                     openExternal(getApplication(), apk)

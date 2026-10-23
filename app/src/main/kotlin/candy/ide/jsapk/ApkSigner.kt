@@ -32,6 +32,146 @@ object ApkSigner {
 
     /** 从 APK 读出全部条目（不含旧 META-INF）的未压缩字节 + 重新打包成已签名 APK */
     fun signV1(apk: candy.ide.fs.CandyPath, entries: List<Pair<String, ByteArray>>): Unit = rezip(apk, entries)
+    /**
+     * APK Signature Scheme v2：整包 1MB 分块摘要，签名块插进 Central Directory 前。
+     * Android 11+（尤其 MagicOS/EMUI）对没带 v2 块的 APK 直接判「No signature found in
+     * package of version 2 or newer」，v1-only 装不上；v1 保留给旧系统。
+     */
+    /**
+     * APK Signature Scheme v2：整包 1MB 分块摘要，签名块插进 Central Directory 前。
+     * Android 11+（尤其 MagicOS/EMUI）对没带 v2 块的 APK 直接判「No signature found in
+     * package of version 2 or newer」，v1-only 装不上；v1 保留给旧系统。
+     */
+    fun signV2(apk: candy.ide.fs.CandyPath) {
+        val key = loadKey() ?: throw RuntimeException("签名密钥不可用")
+        val cert = loadCert() ?: throw RuntimeException("签名证书不可用")
+        val raw = apk.inputStream().use { it.readBytes() }
+        val eocd = locateEocd(raw) ?: throw RuntimeException("找不到 EOCD")
+        val cdOff = ui32(raw, eocd + 16)
+        val cdSize = ui32(raw, eocd + 12)
+
+        // AOSP apksig 算法（与 apksigner 实测字节逐位校验过）：
+        //  contents 三段 = [0, blockStart) + CD + EOCD，EOCD 的 CD 偏移字段改写成 blockStart
+        //  chunk digest = SHA256(0xa5 || uint32LE(chunkLen) || data)
+        //  root = SHA256(0x5a || uint32LE(chunkCount) || concat(chunkDigests))
+        // digest 字段定长 32，先用占位 digest 定出块长，再回填真 digest（长度不变）。
+        val placeholder = ByteArray(32)
+        var block = buildV2Block(placeholder, key, cert)
+        val patchedEocd = raw.copyOfRange(eocd, raw.size).also { pi32(it, 16, cdOff) }
+        val chunkSize = 1024 * 1024
+        val md = MessageDigest.getInstance("SHA-256")
+        val dig = ArrayList<ByteArray>()
+        fun digestRange(src: ByteArray, start: Int, len: Int) {
+            var p = start
+            var remain = len
+            while (remain > 0) {
+                val n = minOf(chunkSize, remain)
+                md.reset()
+                md.update(0xA5.toByte())
+                md.update(u32(n))
+                md.update(src, p, n)
+                dig.add(md.digest())
+                p += n
+                remain -= n
+            }
+        }
+        digestRange(raw, 0, cdOff)
+        digestRange(raw, cdOff, cdSize)
+        digestRange(patchedEocd, 0, patchedEocd.size)
+        md.reset()
+        md.update(0x5a.toByte())
+        md.update(u32(dig.size))
+        for (d in dig) md.update(d)
+        val digestField = md.digest()
+        // 块长不变：用真 digest 重建一次签名块
+        block = buildV2Block(digestField, key, cert)
+        // CD 前插块；EOCD 的 CD 偏移指向新位置
+        val out = ByteArray(raw.size + block.size)
+        System.arraycopy(raw, 0, out, 0, cdOff)
+        System.arraycopy(block, 0, out, cdOff, block.size)
+        System.arraycopy(raw, cdOff, out, cdOff + block.size, raw.size - cdOff)
+        pi32(out, eocd + 16 + block.size, cdOff + block.size)
+        apk.outputStream().use { it.write(out) }
+    }
+
+    private fun buildV2Block(digestField: ByteArray, key: PrivateKey, cert: X509Certificate): ByteArray {
+        // 算法 0x0103 = RSASSA-PKCS1-v1_5 + SHA-256
+        val digestEntry = concatV(u32(0x0103), lp(digestField))
+        val signedData = concatV(
+            lpSeq(listOf(digestEntry)),
+            lpSeq(listOf(cert.encoded)),
+            lpSeq(emptyList()),
+        )
+        val sig = Signature.getInstance("SHA256withRSA")
+        sig.initSign(key)
+        sig.update(signedData)
+        val sigEntry = concatV(u32(0x0103), lp(sig.sign()))
+        val signer = concatV(lp(signedData), lpSeq(listOf(sigEntry)), lp(cert.publicKey.encoded))
+        val payload = lpSeq(listOf(signer))
+        val pair = concatV(u64((4 + payload.size).toLong()), u32(0x7109871a), payload)
+        val magic = "APK Sig Block 42".toByteArray(Charsets.US_ASCII)
+        val innerSize = pair.size + 8 + magic.size
+        return concatV(u64(innerSize.toLong()), pair, u64(innerSize.toLong()), magic)
+    }
+    private fun locateEocd(raw: ByteArray): Int? {
+        var i = raw.size - 22
+        while (i >= 0) {
+            if (raw[i] == 0x50.toByte() && raw[i + 1] == 0x4B.toByte() && raw[i + 2] == 0x05.toByte() && raw[i + 3] == 0x06.toByte()) return i
+            i--
+        }
+        return null
+    }
+
+    private fun ui32(b: ByteArray, p: Int): Int =
+        (b[p].toInt() and 0xFF) or ((b[p + 1].toInt() and 0xFF) shl 8) or ((b[p + 2].toInt() and 0xFF) shl 16) or ((b[p + 3].toInt() and 0xFF) shl 24)
+
+    private fun pi32(b: ByteArray, p: Int, v: Int) {
+        b[p] = v.toByte(); b[p + 1] = (v shr 8).toByte(); b[p + 2] = (v shr 16).toByte(); b[p + 3] = (v shr 24).toByte()
+    }
+
+    private fun u32(v: Int): ByteArray = byteArrayOf(v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte())
+
+    private fun u64(v: Long): ByteArray =
+        byteArrayOf(v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte(), (v shr 32).toByte(), (v shr 40).toByte(), (v shr 48).toByte(), (v shr 56).toByte())
+
+    /** v2 的 length-prefixed：uint32 LE 长度 + 数据 */
+    private fun lp(data: ByteArray): ByteArray {
+        val out = ByteArray(4 + data.size)
+        pi32(out, 0, data.size)
+        System.arraycopy(data, 0, out, 4, data.size)
+        return out
+    }
+
+    /** v2 的序列：u32(内容总长) + 每个元素的 lp（对照 AOSP apksigner 实测字节） */
+    private fun lpSeq(items: List<ByteArray>): ByteArray {
+        val lped = ArrayList<ByteArray>(items.size)
+        var sum = 0
+        for (it in items) {
+            val e = lp(it)
+            lped.add(e)
+            sum += e.size
+        }
+        val out = ByteArray(4 + sum)
+        pi32(out, 0, sum)
+        var off = 4
+        for (e in lped) {
+            System.arraycopy(e, 0, out, off, e.size)
+            off += e.size
+        }
+        return out
+    }
+
+    private fun concatV(vararg parts: ByteArray): ByteArray {
+        var sum = 0
+        for (p in parts) sum += p.size
+        val out = ByteArray(sum)
+        var off = 0
+        for (p in parts) {
+            System.arraycopy(p, 0, out, off, p.size)
+            off += p.size
+        }
+        return out
+    }
 
     // ---- 重建 zip：META-INF 在前 ----
 
@@ -42,11 +182,12 @@ object ApkSigner {
         val manifest = buildManifest(entries)
         val (sf, rsa) = buildSignedPieces(manifest) ?: throw RuntimeException("签名初始化失败")
         val jarBytes = manifest.toByteArray(Charsets.UTF_8)
-        java.util.zip.ZipOutputStream(tmp.outputStream()).use { zos ->
-            put(zos, "META-INF/MANIFEST.MF", jarBytes)
-            put(zos, "META-INF/CERT.SF", sf)
-            put(zos, "META-INF/CERT.RSA", rsa)
-            for ((name, data) in entries) put(zos, name, data)
+        val counter = CountingOutputStream(tmp.outputStream())
+        java.util.zip.ZipOutputStream(counter).use { zos ->
+            put(zos, counter, "META-INF/MANIFEST.MF", jarBytes)
+            put(zos, counter, "META-INF/CERT.SF", sf)
+            put(zos, counter, "META-INF/CERT.RSA", rsa)
+            for ((name, data) in entries) put(zos, counter, name, data)
         }
         // 原文件替换：outputStream 的 "wt" 模式本身就是截断覆盖写，直接覆盖即可。
         // SAF 上先 exists()/delete() 会让 document uri 失效（isChildDocument 找不到物理文件而抛异常），
@@ -55,9 +196,30 @@ object ApkSigner {
         tmp.delete()
     }
 
-    private fun put(zos: java.util.zip.ZipOutputStream, name: String, data: ByteArray) {
+    /**
+     * R+（targetSdk≥30）安装校验要求 resources.arsc 未压缩且数据起点 4 字节对齐，
+     * 否则报 INSTALL_PARSE_FAILED（-124）。其余条目仍走 DEFLATED。
+     */
+    private class CountingOutputStream(out: java.io.OutputStream) : java.io.FilterOutputStream(out) {
+        var count = 0
+        override fun write(b: Int) { out.write(b); count++ }
+        override fun write(b: ByteArray, off: Int, len: Int) { out.write(b, off, len); count += len }
+    }
+
+    private fun put(zos: java.util.zip.ZipOutputStream, counter: CountingOutputStream, name: String, data: ByteArray) {
         val ze = java.util.zip.ZipEntry(name)
-        ze.method = java.util.zip.ZipEntry.DEFLATED
+        if (name == "resources.arsc") {
+            ze.method = java.util.zip.ZipEntry.STORED
+            ze.size = data.size.toLong()
+            val crc = java.util.zip.CRC32()
+            crc.update(data)
+            ze.crc = crc.value
+            // local header 起 30 字节 + 名长后是数据起点，extra 填充到 4 字节对齐
+            val pad = (4 - (counter.count + 30 + name.length) % 4) % 4
+            if (pad > 0) ze.setExtra(ByteArray(pad))
+        } else {
+            ze.method = java.util.zip.ZipEntry.DEFLATED
+        }
         zos.putNextEntry(ze)
         zos.write(data)
         zos.closeEntry()
