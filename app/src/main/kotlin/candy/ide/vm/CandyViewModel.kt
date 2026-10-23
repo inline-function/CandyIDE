@@ -1131,9 +1131,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                         onInput = { readlnDialog() },
                     )
                 } else if (type == ProjectStore.TYPE_JSAPK) {
-                    // 短按 = 打包安装（与长按打包同链路）：编译 → 壳模板 → 签名 → 安装
-                    mdLog("**[运行]** `" + file.name + "` 安卓工程：处理器 → 编译 → 壳模板注 JS → 签名")
-                    buildApkProject(project!!)
+                    // 短按 = 虚拟桥接环境（模拟安装后效果，仅渲染不运行）；长按「运行」才是打包 APK
+                    main.post {
+                        running.value = false
+                        openVirt()
+                    }
                 } else {
                     mdLog("**[运行]** `" + file.name + "` 脚本直连解释器")
                     Engine.runScript(getApplication(), file,
@@ -2277,6 +2279,45 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             )
         }.getOrNull()
     }
+    /** 虚拟桥接环境入口：layout(根组合函数) 调用 → 找到 @composable 函数 → 全屏渲染模拟
+     *  仅渲染不运行：应用点击事件被拦截（按钮不触发 onClick）
+     */
+    fun openVirt() {
+        val file = currentFile.value
+        val src = if (file != null) runCatching { loadTextFor(file) }.getOrNull() else null
+        if (file == null || src == null) {
+            mdLog("**[提示]** 没有打开的文件")
+            return
+        }
+        runCatching {
+            // layout(根)：启动时挂的整屏组合函数
+            val rootName = Regex("layout\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\)").find(src)?.groupValues?.getOrNull(1)
+            if (rootName == null) {
+                mdLog("**[提示]** 未找到 layout(根组合函数) 调用，无法进入虚拟桥接环境")
+                return@runCatching
+            }
+            // @composable \n fun rootName(
+            val decl = Regex("@composable\\s*\\n\\s*fun\\s+" + Regex.escape(rootName) + "\\b").find(src)
+                ?: Regex("@composable\\s+fun\\s+" + Regex.escape(rootName) + "\\b").find(src)
+            if (decl == null) {
+                mdLog("**[提示]** 找不到 @composable " + rootName + " 声明")
+                return@runCatching
+            }
+            val fnLine = src.substring(0, decl.range.first).split("\n").size - 1   // 0-based
+            val pv = composePreviewState(fnLine, 3) ?: run {
+                mdLog("**[提示]** 无法提取 " + rootName + " 的视图树")
+                return@runCatching
+            }
+            virtState.value = pv
+            screen.value = candy.ide.Screen.Virt
+        }.onFailure {
+            mdLog("**[错误]** 虚拟环境打开失败：" + (it.message ?: it.javaClass.simpleName))
+        }
+    }
+
+    /** 虚拟桥接环境的视图树状态 */
+    val virtState = mutableStateOf<candy.ide.ui.ComposePreviewState?>(null)
+
     /** 灯泡：当前文件可用的快速修正（LSP codeActions） */
     data class QuickFix(
         val title: String,

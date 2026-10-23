@@ -2,33 +2,56 @@ package candy.ide.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * @composable 布局预览悬浮窗：把 LSP 提取的视图树 JSON 渲染成缩略 Compose 布局。
- *  尺寸约为屏幕 1/5（比 1/4 略小）；可关闭、可全屏；编辑函数体 1s 后无错自动刷新（见 EditorScreen）。
- *  JSON 形如 {"name":"card","start":2,"end":9,"children":[{"name":"Box","props":{...},"children":[...]}]}
+ * @composable 布局预览悬浮窗（可编辑视图树的可视构建器）：
+ *  - 顶栏极简（像 AI 助手顶栏：小、无边框）且可拖动整个悬浮窗；
+ *  - 点渲染的视图 = 选中（边框高亮）；视图不响应任何「运行期」点击（仅渲染，不运行代码）；
+ *  - 左侧滑栏：视图树大纲，可 删除/添加/复制/剪切/粘贴 视图；
+ *  - 右侧滑栏：设置选中视图的属性（text/placeholder/size/bold/orientation/kind/color）；
+ *  - 顶栏「应用」把视图树再生成的函数体写回源码（编辑器撤销可回退）。
+ *
+ *  数据来自 LspAnalysis.composableTreeJson：{"name","start","end","children":[{"name","text","props","children"}]}
+ *  本地树是源码的一个可编辑快照：外层 state.treeJson 变化（源码被编辑后 1s 刷新）时整体重置。
  */
 data class ComposePreviewState(
     val fnName: String,
@@ -37,96 +60,387 @@ data class ComposePreviewState(
     val treeJson: String,
 )
 
+private fun JSONObject.deepCopy(): JSONObject = JSONObject(this.toString())
+
+/** 按路径取节点（root 自身的路径是空表） */
+private fun nodeAt(root: JSONObject, path: List<Int>): JSONObject? {
+    var cur: JSONObject = root
+    for (i in path) {
+        val kids = runCatching { cur.getJSONArray("children") }.getOrNull() ?: return null
+        if (i < 0 || i >= kids.length()) return null
+        cur = kids.getJSONObject(i)
+    }
+    return cur
+}
+
+/** 父节点里删除指定下标的孩子 */
+private fun removeChild(parent: JSONObject, index: Int) {
+    runCatching { parent.getJSONArray("children") }.getOrNull()?.let { arr ->
+        if (index in 0 until arr.length()) {
+            val kids = (0 until arr.length()).map { arr.getJSONObject(it) }.toMutableList()
+            kids.removeAt(index)
+            parent.put("children", JSONArray(kids))
+        }
+    }
+}
+
+private fun addChild(parent: JSONObject, node: JSONObject) {
+    val arr = runCatching { parent.getJSONArray("children") }.getOrNull() ?: JSONArray().also { parent.put("children", it) }
+    arr.put(node)
+}
+
+private fun insertChild(parent: JSONObject, index: Int, node: JSONObject) {
+    val arr = runCatching { parent.getJSONArray("children") }.getOrNull() ?: JSONArray().also { parent.put("children", it) }
+    val kids = (0 until arr.length()).map { arr.getJSONObject(it) }.toMutableList()
+    kids.add(index.coerceIn(0, kids.size), node)
+    parent.put("children", JSONArray(kids))
+}
+
+private fun mkBox(): JSONObject = JSONObject().apply {
+    put("name", "Box")
+    put("props", JSONObject().apply { put("modifier", "Plain()") })
+}
+
+private fun mkText(t: String): JSONObject = JSONObject().apply {
+    put("name", "Text")
+    put("text", "\"" + t + "\"")
+    put("props", JSONObject().apply { put("size", "14") })
+}
+
 @Composable
 fun ComposePreviewPanel(
     state: ComposePreviewState,
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     onClose: () -> Unit,
+    onApply: (String) -> Unit,
+    onDrag: (IntOffset) -> Unit = {},
 ) {
-    val root = runCatching { JSONObject(state.treeJson) }.getOrNull()
+    // 本地可编辑树：外层 treeJson 变（源码刷新）时重置
+    var tree by remember(state.treeJson) { mutableStateOf(JSONObject(state.treeJson)) }
+    var selPath by remember(state.treeJson) { mutableStateOf<List<Int>?>(null) }
+    var showTree by remember { mutableStateOf(false) }
+    var showProps by remember { mutableStateOf(false) }
+    var clipboard by remember { mutableStateOf<JSONObject?>(null) }
+    var dirty by remember(state.treeJson) { mutableStateOf(false) }
+
+    fun mutate() { tree = JSONObject(tree.toString()); dirty = true }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(candy.ide.ui.theme.CandySurface),
     ) {
-        // 标题栏：函数名 + 全屏切换 + 关闭
+        // 极简顶栏（可拖动、无边框）：树/属性/应用/全屏/关闭
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .height(if (fullscreen) 26.dp else 20.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures { _, drag ->
+                        onDrag(IntOffset(drag.x.roundToInt(), drag.y.roundToInt()))
+                    }
+                }
+                .padding(horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            TinyTopBtn(if (showTree) "树▸" else "树", showTree) { showTree = !showTree }
+            TinyTopBtn(if (showProps) "属性▸" else "属性", showProps && selPath != null) {
+                showProps = !showProps
+            }
             Text(
-                text = "@" + state.fnName + " 布局预览",
-                color = candy.ide.ui.theme.CandyText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
+                text = "@" + state.fnName,
+                color = candy.ide.ui.theme.CandyTextDim,
+                fontSize = 9.sp,
+                modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            IconButton(onClick = onToggleFullscreen, modifier = Modifier.padding(0.dp)) {
+            if (dirty) {
                 Text(
-                    if (fullscreen) "退出全屏" else "全屏",
-                    color = candy.ide.ui.theme.CandyPrimary,
-                    fontSize = 10.sp,
+                    text = "未应用",
+                    color = candy.ide.ui.theme.CandyError,
+                    fontSize = 8.sp,
+                    modifier = Modifier.padding(end = 2.dp),
                 )
             }
-            IconButton(onClick = onClose, modifier = Modifier.padding(0.dp)) {
-                Text("✕", color = candy.ide.ui.theme.CandyTextDim, fontSize = 12.sp)
+            TinyTopBtn("应用", dirty) {
+                onApply(tree.toString())
+                dirty = false
             }
+            TinyTopBtn(if (fullscreen) "退出" else "全屏", true) { onToggleFullscreen() }
+            TinyTopBtn("✕", true) { onClose() }
         }
-        Box(modifier = Modifier.fillMaxSize().padding(4.dp)) {
-            if (root != null) {
-                ViewTreeNode(root, fullscreen)
-            } else {
-                Text("树解析失败", color = candy.ide.ui.theme.CandyTextDim, fontSize = 10.sp)
+        Row(modifier = Modifier.fillMaxSize()) {
+            // 左侧滑栏：视图树大纲 + 节点操作
+            if (showTree) {
+                Column(
+                    modifier = Modifier
+                        .width(if (fullscreen) 170.dp else 110.dp)
+                        .fillMaxHeight()
+                        .background(candy.ide.ui.theme.CandyBg.copy(alpha = 0.6f))
+                        .padding(4.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    val sel = selPath?.let { nodeAt(tree, it) }
+                    if (sel != null) TreeOpsBar(
+                        canPaste = clipboard != null,
+                        onDelete = { selPath?.let { p -> if (p.isNotEmpty()) { val par = nodeAt(tree, p.dropLast(1))!!; removeChild(par, p.last()); mutate() } } },
+                        onCopy = { clipboard = sel.deepCopy() },
+                        onCut = { clipboard = sel.deepCopy(); selPath?.let { p -> if (p.isNotEmpty()) { val par = nodeAt(tree, p.dropLast(1))!!; removeChild(par, p.last()); mutate() } } },
+                        onPasteChild = {
+                            clipboard?.let { cb -> addChild(sel, cb.deepCopy()); mutate() }
+                        },
+                        onAddBox = { addChild(sel, mkBox()); mutate() },
+                        onAddText = { addChild(sel, mkText("文本")); mutate() },
+                    )
+                    val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
+                    if (kids != null) {
+                        for (i in 0 until kids.length()) {
+                            TreeRow(kids.getJSONObject(i), emptyList(), selPath, 0) { p -> selPath = p; showProps = true }
+                        }
+                    }
+                }
+            }
+            // 中间：渲染区（点击视图 = 选中；不响应运行期点击）
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(4.dp)) {
+                Column {
+                    val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
+                    if (kids != null) {
+                        for (i in 0 until kids.length()) {
+                            ViewTreeNode(kids.getJSONObject(i), emptyList(), selPath, fullscreen) { p -> selPath = p }
+                        }
+                    } else {
+                        Text("树解析失败", color = candy.ide.ui.theme.CandyTextDim, fontSize = 10.sp)
+                    }
+                }
+            }
+            // 右侧滑栏：选中视图的属性
+            if (showProps && selPath != null) {
+                val node = nodeAt(tree, selPath!!)
+                if (node != null) PropPanel(
+                    node = node,
+                    fullscreen = fullscreen,
+                    onEdit = { mutate() },
+                    onAddProp = { k, v ->
+                        val props = runCatching { node.getJSONObject("props") }.getOrNull()
+                            ?: JSONObject().also { node.put("props", it) }
+                        props.put(k, v)
+                        mutate()
+                    },
+                    onRemoveProp = { k ->
+                        runCatching { node.getJSONObject("props") }.getOrNull()?.remove(k)
+                        mutate()
+                    },
+                )
             }
         }
     }
 }
 
-/** 单个视图节点 → 缩略 Compose 渲染；children 递归 */
+/** 顶栏小按钮（无边框、像 AI 助手顶栏） */
 @Composable
-private fun ViewTreeNode(node: JSONObject, fullscreen: Boolean) {
+private fun TinyTopBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(24.dp)) {
+        Text(
+            label,
+            color = if (enabled) candy.ide.ui.theme.CandyPrimary else candy.ide.ui.theme.CandyTextDim,
+            fontSize = 9.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 树大纲一行：名字 + 摘要，点击选中，按路径高亮 */
+@Composable
+private fun TreeRow(node: JSONObject, path: List<Int>, selPath: List<Int>?, depth: Int, onSelect: (List<Int>) -> Unit) {
+    val name = node.optString("name")
+    val txt = node.optString("text").trim('\"')
+    val selected = selPath != null && selPath == path
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onSelect(path) }
+                .background(if (selected) candy.ide.ui.theme.CandyPrimary.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+                .padding(start = (depth * 8).dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                name.removePrefix("@"),
+                color = if (selected) candy.ide.ui.theme.CandyPrimary else candy.ide.ui.theme.CandyText,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (txt.isNotEmpty()) {
+                Spacer(Modifier.width(4.dp))
+                Text(txt, color = candy.ide.ui.theme.CandyTextDim, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        val kids = runCatching { node.getJSONArray("children") }.getOrNull()
+        if (kids != null) for (i in 0 until kids.length()) {
+            TreeRow(kids.getJSONObject(i), path + i, selPath, depth + 1, onSelect)
+        }
+    }
+}
+
+/** 选中节点的操作条：删除/复制/剪切/粘贴/添加 */
+@Composable
+private fun TreeOpsBar(
+    canPaste: Boolean,
+    onDelete: () -> Unit,
+    onCopy: () -> Unit,
+    onCut: () -> Unit,
+    onPasteChild: () -> Unit,
+    onAddBox: () -> Unit,
+    onAddText: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            TinyOpBtn("🗑", true, onDelete)
+            TinyOpBtn("📋", true, onCopy)
+            TinyOpBtn("✂", true, onCut)
+            TinyOpBtn("📥", canPaste, onPasteChild)
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            TinyOpBtn("＋Box", true, onAddBox)
+            TinyOpBtn("＋Text", true, onAddText)
+        }
+    }
+}
+
+@Composable
+private fun TinyOpBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(20.dp)) {
+        Text(label, color = if (enabled) candy.ide.ui.theme.CandySecondary else candy.ide.ui.theme.CandyTextDim, fontSize = 8.sp)
+    }
+}
+
+/** 右侧属性面板：对已知属性做行内编辑 */
+@Composable
+private fun PropPanel(
+    node: JSONObject,
+    fullscreen: Boolean,
+    onEdit: () -> Unit,
+    onAddProp: (String, String) -> Unit,
+    onRemoveProp: (String) -> Unit,
+) {
+    val name = node.optString("name")
+    val props = remember(node) { runCatching { node.getJSONObject("props") }.getOrNull() ?: JSONObject() }
+    Column(
+        modifier = Modifier
+            .width(if (fullscreen) 180.dp else 120.dp)
+            .fillMaxHeight()
+            .background(candy.ide.ui.theme.CandyBg.copy(alpha = 0.6f))
+            .padding(4.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Text(
+            name.removePrefix("@") + " 属性",
+            color = candy.ide.ui.theme.CandyText,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(4.dp))
+        // text：既是顶层 text 字段也是 props.text（取显示用值，写回统一写 props）
+        val textDisp = node.optString("text").trim('\"').ifEmpty { props.optString("text").trim('\"') }
+        PropTextRow("text", textDisp) { v ->
+            node.put("text", "\"" + v + "\""); onEdit()
+        }
+        PropTextRow("placeholder", props.optString("placeholder").trim('\"')) { v ->
+            onAddProp("placeholder", "\"" + v + "\"")
+        }
+        PropTextRow("size", props.optString("size")) { v -> onAddProp("size", v) }
+        PropTextRow("color", props.optString("color")) { v -> onAddProp("color", "\"" + v + "\"") }
+        PropBoolRow("bold", props.optString("bold") == "true") { v -> onAddProp("bold", if (v) "true" else "false") }
+        PropTextRow("orientation", props.optString("orientation").trim('\"')) { v ->
+            onAddProp("orientation", "\"" + v + "\"")
+        }
+        PropTextRow("kind", props.optString("kind").trim('\"')) { v -> onAddProp("kind", "\"" + v + "\"") }
+        Spacer(Modifier.height(6.dp))
+        TinyOpBtn("清空属性", true) {
+            for (k in PROP_EDIT_KEYS) onRemoveProp(k)
+            onEdit()
+        }
+    }
+}
+
+private val PROP_EDIT_KEYS = listOf("text", "placeholder", "size", "color", "bold", "orientation", "kind", "modifier", "contentAlignment")
+
+@Composable
+private fun PropTextRow(label: String, value: String, onValue: (String) -> Unit) {
+    var v by remember(value) { mutableStateOf(value) }
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = candy.ide.ui.theme.CandyTextDim, fontSize = 9.sp, modifier = Modifier.width(56.dp))
+        BasicTextField(
+            value = v,
+            onValueChange = { v = it; onValue(it) },
+            textStyle = TextStyle(color = candy.ide.ui.theme.CandyText, fontSize = 9.sp),
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, candy.ide.ui.theme.CandySurfaceVariant, RoundedCornerShape(3.dp))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun PropBoolRow(label: String, value: Boolean, onValue: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = candy.ide.ui.theme.CandyTextDim, fontSize = 9.sp, modifier = Modifier.width(56.dp))
+        Text(
+            if (value) "● true" else "○ false",
+            color = if (value) candy.ide.ui.theme.CandyPrimary else candy.ide.ui.theme.CandyTextDim,
+            fontSize = 10.sp,
+            modifier = Modifier.clickable { onValue(!value) },
+        )
+    }
+}
+
+/** 单个视图节点 → 缩略 Compose 渲染；children 递归。
+ *  点击 = 选中（构建器交互，不运行任何应用逻辑）；选中节点加高亮边框 */
+@Composable
+private fun ViewTreeNode(node: JSONObject, path: List<Int>, selPath: List<Int>?, fullscreen: Boolean, onSelect: (List<Int>) -> Unit) {
     val name = node.optString("name")
     val props = runCatching { node.getJSONObject("props") }.getOrNull()
     val kids = runCatching { node.getJSONArray("children") }.getOrNull()
     val childCount = kids?.length() ?: 0
-    val horizontal = props?.optString("orientation")?.trim('"') == "horizontal"
+    val horizontal = props?.optString("orientation")?.trim('\"') == "horizontal"
+    val selected = selPath != null && selPath == path
+    val selBorder: Modifier = if (selected) Modifier.border(1.5.dp, candy.ide.ui.theme.CandyPrimary, RoundedCornerShape(3.dp)) else Modifier
+    val click: Modifier = Modifier.clickable { onSelect(path) }
     val scale = if (fullscreen) 1f else 0.6f
     when (name) {
         "Box", "Column", "Row" -> {
-            val shape = RoundedCornerShape(2.dp)
             Box(
                 modifier = Modifier
                     .widthIn(min = 24.dp)
                     .padding(2.dp)
-                    .border(1.dp, candy.ide.ui.theme.CandySurfaceVariant, shape),
+                    .then(selBorder)
+                    .then(click)
+                    .border(1.dp, candy.ide.ui.theme.CandySurfaceVariant, RoundedCornerShape(2.dp)),
             ) {
                 if (childCount > 0) {
                     if (horizontal || name == "Row") {
                         Row(modifier = Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), fullscreen) }
+                            repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), path + i, selPath, fullscreen, onSelect) }
                         }
                     } else {
                         Column(modifier = Modifier.padding(3.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), fullscreen) }
+                            repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), path + i, selPath, fullscreen, onSelect) }
                         }
                     }
                 } else {
-                    Text(
-                        "Box",
-                        color = candy.ide.ui.theme.CandyTextDim,
-                        fontSize = 8.sp,
-                        modifier = Modifier.padding(2.dp),
-                    )
+                    Text("Box", color = candy.ide.ui.theme.CandyTextDim, fontSize = 8.sp, modifier = Modifier.padding(2.dp))
                 }
             }
         }
         "Text", "label" -> {
-            val t = node.optString("text").trim('"').ifEmpty { props?.optString("text")?.trim('"') ?: "" }
+            val t = node.optString("text").trim('\"').ifEmpty { props?.optString("text")?.trim('\"') ?: "" }
             val sz = props?.optString("size")?.toIntOrNull()
             val bold = props?.optString("bold") == "true"
             Text(
@@ -136,25 +450,30 @@ private fun ViewTreeNode(node: JSONObject, fullscreen: Boolean) {
                 fontWeight = if (bold) FontWeight.Bold else null,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.then(selBorder).then(click),
             )
         }
         "Button" -> {
             Box(
                 modifier = Modifier
                     .padding(2.dp)
+                    .then(selBorder)
+                    .then(click)
                     .border(1.dp, candy.ide.ui.theme.CandyPrimary, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             ) {
-                if (childCount > 0) Column { repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), fullscreen) } }
+                if (childCount > 0) Column { repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), path + i, selPath, fullscreen, onSelect) } }
                 else Text("按钮", color = candy.ide.ui.theme.CandyPrimary, fontSize = 9.sp)
             }
         }
         "TextField" -> {
-            val ph = node.optString("text").trim('"').ifEmpty { props?.optString("placeholder")?.trim('"') ?: "" }
+            val ph = node.optString("text").trim('\"').ifEmpty { props?.optString("placeholder")?.trim('\"') ?: "" }
             Box(
                 modifier = Modifier
                     .widthIn(min = 60.dp)
                     .padding(2.dp)
+                    .then(selBorder)
+                    .then(click)
                     .border(1.dp, candy.ide.ui.theme.CandySurfaceVariant, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 3.dp),
             ) {
@@ -167,10 +486,12 @@ private fun ViewTreeNode(node: JSONObject, fullscreen: Boolean) {
                     .widthIn(min = 80.dp)
                     .heightIn(min = 30.dp)
                     .padding(2.dp)
-                    .background(Color(0xFFE0AF68).copy(alpha = 0.25f), RoundedCornerShape(4.dp))
+                    .then(selBorder)
+                    .then(click)
+                    .background(androidx.compose.ui.graphics.Color(0xFFE0AF68).copy(alpha = 0.25f), RoundedCornerShape(4.dp))
                     .padding(4.dp),
             ) {
-                Text("📊 柱状图", color = Color(0xFFE0AF68), fontSize = 9.sp)
+                Text("📊 柱状图", color = androidx.compose.ui.graphics.Color(0xFFE0AF68), fontSize = 9.sp)
             }
         }
         "Image" -> Box(
@@ -178,6 +499,8 @@ private fun ViewTreeNode(node: JSONObject, fullscreen: Boolean) {
                 .widthIn(min = 40.dp)
                 .heightIn(min = 30.dp)
                 .padding(2.dp)
+                .then(selBorder)
+                .then(click)
                 .background(candy.ide.ui.theme.CandySurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
                 .padding(4.dp),
         ) { Text("🖼", fontSize = 12.sp) }
@@ -189,6 +512,8 @@ private fun ViewTreeNode(node: JSONObject, fullscreen: Boolean) {
                 modifier = Modifier
                     .widthIn(min = 28.dp)
                     .padding(2.dp)
+                    .then(selBorder)
+                    .then(click)
                     .border(
                         1.dp,
                         if (isComposeCall) candy.ide.ui.theme.CandyPrimary.copy(alpha = 0.6f) else candy.ide.ui.theme.CandySurfaceVariant,
@@ -205,7 +530,7 @@ private fun ViewTreeNode(node: JSONObject, fullscreen: Boolean) {
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (childCount > 0) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), fullscreen) }
+                        repeat(childCount) { i -> ViewTreeNode(kids!!.getJSONObject(i), path + i, selPath, fullscreen, onSelect) }
                     }
                 }
             }

@@ -115,7 +115,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 
-private data class LongPressMenu(val x: Float, val y: Float, val line: Int, val col: Int)
+private data class LongPressMenu(val x: Float, val y: Float, val line: Int, val col: Int, val preview: candy.ide.ui.ComposePreviewState? = null)
 
 private data class RenameRequest(val word: String, val line: Int, val col: Int)
 
@@ -147,6 +147,8 @@ fun EditorScreen(vm: CandyViewModel) {
     var quickWord by remember { mutableStateOf<String?>(null) }
     // @composable 布局预览悬浮窗：长按 composable 函数弹出；编辑该函数 1s 无错自动刷新
     var composePreview by remember { mutableStateOf<candy.ide.ui.ComposePreviewState?>(null) }
+    // 预览悬浮窗：顶栏拖动的位移（顶栏 onDrag 累加）
+    var previewOffset by remember { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
     var previewFullscreen by remember { mutableStateOf(false) }
     // 编辑节拍：onTextChange 计数，防抖用于预览刷新
     var textEditTick by remember { mutableIntStateOf(0) }
@@ -348,7 +350,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                         strokeWidth = 2.dp
                                     )
                                 } else {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "运行（长按打包 APK）", tint = CandySecondary, modifier = Modifier.size(21.dp))
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "运行（短按虚拟桥接环境 / 长按打包 APK）", tint = CandySecondary, modifier = Modifier.size(21.dp))
                                 }
                             }
                             // 第 4 按钮：短按 = 输出/日志抽屉；长按 = git 页（未装 git 提示安装）
@@ -509,14 +511,9 @@ fun EditorScreen(vm: CandyViewModel) {
                                 readOnly = isMdProject,
                                 onEditorReady = { editor = it },
                                 onLongPress = { x, y, line, col ->
-                                    // 命中 @composable 函数（名或体内）：直接弹布局预览悬浮窗，不进长按菜单
+                                    // 命中 @composable 函数时附上预览状态：长按菜单里选「预览布局」才弹悬浮窗
                                     val pv = runCatching { vm.composePreviewState(line, col) }.getOrNull()
-                                    if (pv != null) {
-                                        composePreview = pv
-                                        previewFullscreen = false
-                                    } else {
-                                        longMenu = LongPressMenu(x, y, line, col)
-                                    }
+                                    longMenu = LongPressMenu(x, y, line, col, pv)
                                 },
                                 completionLongClick = { label, kind ->
                                     val ed = editor ?: return@SoraEditorView
@@ -634,6 +631,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                         else Modifier.fillMaxWidth(0.42f)
                                     )
                                     .heightIn(max = if (previewFullscreen) 4000.dp else 300.dp)
+                                    .offset { previewOffset }
                                     .padding(end = 8.dp, top = 4.dp),
                                 shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
                                 color = candy.ide.ui.theme.CandySurface,
@@ -644,7 +642,31 @@ fun EditorScreen(vm: CandyViewModel) {
                                     state = pv,
                                     fullscreen = previewFullscreen,
                                     onToggleFullscreen = { previewFullscreen = !previewFullscreen },
-                                    onClose = { composePreview = null; previewFullscreen = false },
+                                    onClose = { composePreview = null; previewFullscreen = false; previewOffset = androidx.compose.ui.unit.IntOffset.Zero },
+                                    onApply = { treeJson ->
+                                        // 视图树 → 函数体写回源码：保留签名行（含 @composable），替换体；编辑器可撤销
+                                        runCatching {
+                                            val tree = org.json.JSONObject(treeJson)
+                                            val content = editor?.text?.toString() ?: ""
+                                            if (content.isEmpty()) return@runCatching
+                                            val lines = content.split("\n").toMutableList()
+                                            var sig = (pv.start - 1).coerceIn(0, lines.size - 1)
+                                            while (sig < lines.size && !lines[sig].contains("{")) sig++
+                                            if (sig >= lines.size) return@runCatching
+                                            val endIdx = (pv.end - 1).coerceIn(sig, lines.size - 1)
+                                            val head = lines.subList(0, sig + 1)
+                                            val tail = if (endIdx + 1 < lines.size) lines.subList(endIdx + 1, lines.size) else emptyList()
+                                            val out = ArrayList<String>(head)
+                                            out += candy.ide.ui.PreviewCodeGen.bodyLines(tree)
+                                            out += "}"
+                                            out += tail
+                                            val newText = out.joinToString("\n")
+                                            editor?.text?.replace(0, editor!!.text.length, newText)
+                                        }.onFailure {
+                                            android.widget.Toast.makeText(ctx, "写回失败：" + (it.message ?: ""), android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    onDrag = { delta -> previewOffset = androidx.compose.ui.unit.IntOffset(previewOffset.x + delta.x, previewOffset.y + delta.y) },
                                 )
                             }
                         }
@@ -746,6 +768,14 @@ fun EditorScreen(vm: CandyViewModel) {
                             ) {
                                 Column {
                                     val ed = editor
+                                    // 命中 @composable 函数：菜单首项「预览布局」弹悬浮窗
+                                    if (menu.preview != null) {
+                                        LongMenuRow("▶ 预览布局") {
+                                            longMenu = null
+                                            composePreview = menu.preview
+                                            previewFullscreen = false
+                                        }
+                                    }
                                     if (word != null) {
                                         LongMenuRow("使用指名调用法") {
                                             longMenu = null
