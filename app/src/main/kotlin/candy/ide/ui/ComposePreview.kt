@@ -22,8 +22,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -130,50 +136,106 @@ fun ComposePreviewPanel(
             .fillMaxSize()
             .background(candy.ide.ui.theme.CandySurface),
     ) {
-        // 极简顶栏（可拖动、无边框）：树/属性/应用/全屏/关闭
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (fullscreen) 26.dp else 20.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures { _, drag ->
-                        onDrag(IntOffset(drag.x.toInt(), drag.y.toInt()))
-                    }
+        if (fullscreen) {
+            // 全屏顶栏：像 AI 助手页那样 —— 返回箭头 + 标题 + 操作，含状态栏 padding
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(48.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "退出全屏",
+                        tint = candy.ide.ui.theme.CandyText,
+                    )
                 }
-                .padding(horizontal = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TinyTopBtn(if (showTree) "树▸" else "树", active = showTree) { showTree = !showTree }
-            TinyTopBtn(if (showProps) "属性▸" else "属性", active = showProps && selPath != null) {
-                // 没选中视图时默认选第一个顶层视图，属性面板立即可用
-                if (selPath == null) {
-                    val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
-                    if (kids != null && kids.length() > 0) selPath = listOf(0)
-                }
-                showProps = !showProps
-            }
-            Text(
-                text = "@" + state.fnName,
-                color = candy.ide.ui.theme.CandyTextDim,
-                fontSize = 9.sp,
-                modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (dirty) {
                 Text(
-                    text = "未应用",
-                    color = candy.ide.ui.theme.CandyError,
-                    fontSize = 8.sp,
-                    modifier = Modifier.padding(end = 2.dp),
+                    text = "@" + state.fnName + " 布局预览",
+                    color = candy.ide.ui.theme.CandyText,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.weight(1f))
+                TinyTopBtn(if (showTree) "树▸" else "树", active = showTree) { showTree = !showTree }
+                TinyTopBtn(if (showProps) "属性▸" else "属性", active = showProps && selPath != null) {
+                    // 没选中视图时默认选第一个顶层视图，属性面板立即可用
+                    if (selPath == null) {
+                        val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
+                        if (kids != null && kids.length() > 0) selPath = listOf(0)
+                    }
+                    showProps = !showProps
+                }
+                if (dirty) {
+                    Text(
+                        text = "未应用",
+                        color = candy.ide.ui.theme.CandyError,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                }
+                TinyTopBtn("应用", active = dirty) {
+                    onApply(tree.toString())
+                    dirty = false
+                }
+                IconButton(onClick = onClose) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "关闭预览",
+                        tint = candy.ide.ui.theme.CandyTextDim,
+                    )
+                }
             }
-            TinyTopBtn("应用", active = dirty) {
-                onApply(tree.toString())
-                dirty = false
+        } else {
+            // 悬浮小窗顶栏：极简、无边框、可拖动
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .pointerInput(Unit) {
+                        detectDragGestures { _, drag ->
+                            onDrag(IntOffset(drag.x.toInt(), drag.y.toInt()))
+                        }
+                    }
+                    .padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TinyTopBtn(if (showTree) "树▸" else "树", active = showTree) { showTree = !showTree }
+                TinyTopBtn(if (showProps) "属性▸" else "属性", active = showProps && selPath != null) {
+                    // 没选中视图时默认选第一个顶层视图，属性面板立即可用
+                    if (selPath == null) {
+                        val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
+                        if (kids != null && kids.length() > 0) selPath = listOf(0)
+                    }
+                    showProps = !showProps
+                }
+                Text(
+                    text = "@" + state.fnName,
+                    color = candy.ide.ui.theme.CandyTextDim,
+                    fontSize = 9.sp,
+                    modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (dirty) {
+                    Text(
+                        text = "未应用",
+                        color = candy.ide.ui.theme.CandyError,
+                        fontSize = 8.sp,
+                        modifier = Modifier.padding(end = 2.dp),
+                    )
+                }
+                TinyTopBtn("应用", active = dirty) {
+                    onApply(tree.toString())
+                    dirty = false
+                }
+                TinyTopBtn("全屏", true) { onToggleFullscreen() }
+                TinyTopBtn("✕", true) { onClose() }
             }
-            TinyTopBtn(if (fullscreen) "退出" else "全屏", true) { onToggleFullscreen() }
-            TinyTopBtn("✕", true) { onClose() }
         }
         Row(modifier = Modifier.fillMaxSize()) {
             // 左侧滑栏：视图树大纲 + 节点操作

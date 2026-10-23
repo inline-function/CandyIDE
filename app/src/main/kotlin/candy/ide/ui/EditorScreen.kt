@@ -165,7 +165,8 @@ fun EditorScreen(vm: CandyViewModel) {
     val knownMtimes = remember { androidx.compose.runtime.mutableStateMapOf<String, Long>() }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
 
-    BackHandler { vm.backFromEditor() }
+    // 全屏预览时返回键 = 退出全屏（像 AI 助手页那样）；否则退编辑器
+    BackHandler { if (previewFullscreen) previewFullscreen = false else vm.backFromEditor() }
 
     // 外部修改检测：活动恢复 / agent 回复完毕 / 切换当前文件时，比对磁盘 mtime
     LaunchedEffect(vm.resumeNonce.intValue, safe) {
@@ -641,12 +642,13 @@ fun EditorScreen(vm: CandyViewModel) {
                                         else Modifier.fillMaxWidth(0.42f)
                                     )
                                     .heightIn(max = if (previewFullscreen) 4000.dp else 300.dp)
-                                    .offset { previewOffset }
-                                    .padding(end = 8.dp, top = 4.dp),
-                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                    .offset { if (previewFullscreen) androidx.compose.ui.unit.IntOffset.Zero else previewOffset }
+                                    .then(if (previewFullscreen) Modifier else Modifier.padding(end = 8.dp, top = 4.dp)),
+                                shape = if (previewFullscreen) androidx.compose.foundation.shape.RoundedCornerShape(0.dp)
+                                        else androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
                                 color = candy.ide.ui.theme.CandySurface,
-                                tonalElevation = 4.dp,
-                                shadowElevation = 10.dp,
+                                tonalElevation = if (previewFullscreen) 0.dp else 4.dp,
+                                shadowElevation = if (previewFullscreen) 0.dp else 10.dp,
                             ) {
                                 candy.ide.ui.ComposePreviewPanel(
                                     state = pv,
