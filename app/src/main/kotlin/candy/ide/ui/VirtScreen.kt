@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -50,9 +52,9 @@ fun VirtScreen(vm: candy.ide.vm.CandyViewModel) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { vm.screen.value = candy.ide.Screen.Editor }) {
+            IconButton(onClick = { vm.screen.value = candy.ide.ui.Screen.Editor }) {
                 Icon(
-                    androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                    Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "返回编辑器",
                     tint = candy.ide.ui.theme.CandyText,
                 )
@@ -165,7 +167,7 @@ private fun VirtNode(node: JSONObject) {
             Text(
                 text = txt.ifEmpty { "文本" },
                 color = candy.ide.ui.theme.CandyText,
-                fontSize = ((sz ?: 14).coerceIn(8f, 22f)).sp,
+                fontSize = ((sz ?: 14).toFloat().coerceIn(8f, 22f)).sp,
                 fontWeight = if (bold) FontWeight.Bold else null,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,

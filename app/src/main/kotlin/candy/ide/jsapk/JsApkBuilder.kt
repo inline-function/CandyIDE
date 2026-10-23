@@ -110,6 +110,12 @@ object JsApkBuilder {
         if (!samePkg) {
             val edits = HashMap<String, String>()
             edits[JsApkConfig.DEFAULT_PACKAGE] = cfg.pkg
+            // 派生串必须按新包名改写：provider authorities 与自定义权限要求全局唯一，
+            // 不改则两个工程装出同名 authority（INSTALL_FAILED_CONFLICTING_PROVIDER）；
+            // 组件类名（.MainActivity 等）不能动——dex 里的类仍在模板包下
+            edits[JsApkConfig.DEFAULT_PACKAGE + ".androidx-startup"] = cfg.pkg + ".androidx-startup"
+            edits[JsApkConfig.DEFAULT_PACKAGE + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"] =
+                cfg.pkg + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
             edits["1.0"] = cfg.versionName
             edits["Sublimation 应用"] = cfg.label
             for (i in entries.indices) {

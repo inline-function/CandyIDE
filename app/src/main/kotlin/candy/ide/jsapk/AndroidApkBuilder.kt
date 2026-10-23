@@ -114,7 +114,15 @@ object AndroidApkBuilder {
         // 版本：versionCode(0x0101021b) / versionName(0x0101021c) 是框架 attr，走 intEdits/stringEdits。
         val pkg = "functor.sublimation." + (config.pkgSeed.ifBlank { asciiSeed(project) })
         val manifestEdits = HashMap<String, String>()
-        if (pkg != TEMPLATE_PKG) manifestEdits[TEMPLATE_PKG] = pkg
+        if (pkg != TEMPLATE_PKG) {
+            manifestEdits[TEMPLATE_PKG] = pkg
+            // 派生串必须一起改：provider authorities 与自定义权限要求全局唯一，
+            // 不改则两个工程装出同名 authority（INSTALL_FAILED_CONFLICTING_PROVIDER）；
+            // 组件类名（.MainActivity 等）不能动——dex 里的类仍在模板包下
+            manifestEdits[TEMPLATE_PKG + ".androidx-startup"] = pkg + ".androidx-startup"
+            manifestEdits[TEMPLATE_PKG + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"] =
+                pkg + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        }
         if (config.label.isNotBlank() && config.label != TEMPLATE_LABEL) manifestEdits[TEMPLATE_LABEL] = config.label
         if (config.versionName != "1.0") manifestEdits["1.0"] = config.versionName
         val intEdits = HashMap<String, Int>()

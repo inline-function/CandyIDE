@@ -36,7 +36,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
@@ -138,14 +137,19 @@ fun ComposePreviewPanel(
                 .height(if (fullscreen) 26.dp else 20.dp)
                 .pointerInput(Unit) {
                     detectDragGestures { _, drag ->
-                        onDrag(IntOffset(drag.x.roundToInt(), drag.y.roundToInt()))
+                        onDrag(IntOffset(drag.x.toInt(), drag.y.toInt()))
                     }
                 }
                 .padding(horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TinyTopBtn(if (showTree) "树▸" else "树", showTree) { showTree = !showTree }
-            TinyTopBtn(if (showProps) "属性▸" else "属性", showProps && selPath != null) {
+            TinyTopBtn(if (showTree) "树▸" else "树", active = showTree) { showTree = !showTree }
+            TinyTopBtn(if (showProps) "属性▸" else "属性", active = showProps && selPath != null) {
+                // 没选中视图时默认选第一个顶层视图，属性面板立即可用
+                if (selPath == null) {
+                    val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
+                    if (kids != null && kids.length() > 0) selPath = listOf(0)
+                }
                 showProps = !showProps
             }
             Text(
@@ -164,7 +168,7 @@ fun ComposePreviewPanel(
                     modifier = Modifier.padding(end = 2.dp),
                 )
             }
-            TinyTopBtn("应用", dirty) {
+            TinyTopBtn("应用", active = dirty) {
                 onApply(tree.toString())
                 dirty = false
             }
@@ -238,14 +242,19 @@ fun ComposePreviewPanel(
     }
 }
 
-/** 顶栏小按钮（无边框、像 AI 助手顶栏） */
+/** 顶栏小按钮（无边框、像 AI 助手顶栏）：enabled 控制可点；active 控制高亮色 */
 @Composable
-private fun TinyTopBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun TinyTopBtn(label: String, enabled: Boolean = true, active: Boolean = false, onClick: () -> Unit) {
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(24.dp)) {
         Text(
             label,
-            color = if (enabled) candy.ide.ui.theme.CandyPrimary else candy.ide.ui.theme.CandyTextDim,
+            color = when {
+                active -> candy.ide.ui.theme.CandySecondary
+                !enabled -> candy.ide.ui.theme.CandyTextDim
+                else -> candy.ide.ui.theme.CandyPrimary
+            },
             fontSize = 9.sp,
+            fontWeight = if (active) FontWeight.Bold else null,
             maxLines = 1,
         )
     }
@@ -263,7 +272,7 @@ private fun TreeRow(node: JSONObject, path: List<Int>, selPath: List<Int>?, dept
                 .fillMaxWidth()
                 .clickable { onSelect(path) }
                 .background(if (selected) candy.ide.ui.theme.CandyPrimary.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
-                .padding(start = (depth * 8).dp, vertical = 2.dp),
+                .padding(start = (depth * 8).dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(

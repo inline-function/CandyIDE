@@ -149,6 +149,7 @@ fun EditorScreen(vm: CandyViewModel) {
     var composePreview by remember { mutableStateOf<candy.ide.ui.ComposePreviewState?>(null) }
     // 预览悬浮窗：顶栏拖动的位移（顶栏 onDrag 累加）
     var previewOffset by remember { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
+    val previewScope = androidx.compose.runtime.rememberCoroutineScope()
     var previewFullscreen by remember { mutableStateOf(false) }
     // 编辑节拍：onTextChange 计数，防抖用于预览刷新
     var textEditTick by remember { mutableIntStateOf(0) }
@@ -511,9 +512,18 @@ fun EditorScreen(vm: CandyViewModel) {
                                 readOnly = isMdProject,
                                 onEditorReady = { editor = it },
                                 onLongPress = { x, y, line, col ->
-                                    // 命中 @composable 函数时附上预览状态：长按菜单里选「预览布局」才弹悬浮窗
-                                    val pv = runCatching { vm.composePreviewState(line, col) }.getOrNull()
-                                    longMenu = LongPressMenu(x, y, line, col, pv)
+                                    // 菜单先弹（不阻塞）；命中 @composable 函数时后台算视图树，
+                                    // 算好把「预览布局」选项填进菜单（首次分析慢，不在主线程等）
+                                    longMenu = LongPressMenu(x, y, line, col, null)
+                                    previewScope.launch {
+                                        val pv = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                            runCatching { vm.composePreviewState(line, col) }.getOrNull()
+                                        }
+                                        val cur = longMenu
+                                        if (cur != null && cur.line == line && cur.col == col) {
+                                            longMenu = cur.copy(preview = pv)
+                                        }
+                                    }
                                 },
                                 completionLongClick = { label, kind ->
                                     val ed = editor ?: return@SoraEditorView

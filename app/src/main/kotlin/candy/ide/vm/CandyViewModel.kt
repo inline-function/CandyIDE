@@ -2303,13 +2303,18 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 mdLog("**[提示]** 找不到 @composable " + rootName + " 声明")
                 return@runCatching
             }
-            val fnLine = src.substring(0, decl.range.first).split("\n").size - 1   // 0-based
-            val pv = composePreviewState(fnLine, 3) ?: run {
+            // 位置要落在 fun 行的名字上（@composable 注解行取不到函数体匹配）
+            val funAt = src.indexOf("fun ", decl.range.first)
+            val head = src.substring(0, funAt)
+            val fnLine = head.split("\n").size - 1   // 0-based：fun 所在行
+            val lineStart = head.lastIndexOf("\n") + 1
+            val nameCol = funAt - lineStart + 4       // 跳过 "fun " 落在名字首字符
+            val pv = composePreviewState(fnLine, nameCol) ?: run {
                 mdLog("**[提示]** 无法提取 " + rootName + " 的视图树")
                 return@runCatching
             }
             virtState.value = pv
-            screen.value = candy.ide.Screen.Virt
+            screen.value = candy.ide.ui.Screen.Virt
         }.onFailure {
             mdLog("**[错误]** 虚拟环境打开失败：" + (it.message ?: it.javaClass.simpleName))
         }
