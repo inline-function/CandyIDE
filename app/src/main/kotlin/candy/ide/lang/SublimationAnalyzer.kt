@@ -59,6 +59,7 @@ class SublimationAnalyzer(
                 val dl = semantic[k]
                 val dc = semantic[k + 1]
                 val type = semantic[k + 3]
+                val mods = semantic[k + 4]
                 k += 5
                 if (dl == 0) col += dc else { line += dl; col = dc }
                 if (line < 0 || col < 0) continue
@@ -67,6 +68,8 @@ class SublimationAnalyzer(
                 // 同列已被词法认定为函数、且语义只是普通变量时，保留词法结果
                 val key = (line.toLong() shl 32) or col.toLong()
                 if (type == 4 && key in lexicalFunction) continue
+                // 装饰位 0（decorated）：@view 结构体名 / @compose 函数名 → 强调色压默认类型/函数色
+                if (mods and 1 != 0) { addSpan(perLine, line, col, Schemes.styleOfToken("decorated")) } else
                 addSpan(perLine, line, col, style)
             }
         }

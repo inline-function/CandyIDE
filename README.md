@@ -37,3 +37,13 @@ gradlew.bat :app:installDebug   :: 装到已连接的手机
 
 - [sora-editor](https://github.com/Rosemoe/sora-editor) —— Android 代码编辑器组件，**LGPL-2.1**（见 `OPEN_SOURCE_NOTICES.md`）
 ```
+## Windows 桌面端（`desktop` 模块）
+
+与 Android 端共用的 Compose Multiplatform 跨平台实现（详见 [`desktop/README.md`](desktop/README.md)）：
+
+- 共享 sublimation 语言引擎（frontend/compiler/interpreter/language-service 进程内直连）
+- 共享 Android 端平台无关源码（主题、Markdown 渲染、诊断模型）与内置文档资产
+- Compose 原生代码编辑器：真实 Lexer 语法高亮、LSP 实时诊断下划线与补全
+- 运行：`.subs` 走解释器直连；工程编译后交 Node.js 执行（或解释器模式）
+- `gradlew.bat :desktop:run` 开发运行；`gradlew.bat :desktop:createDistributable` 打包免安装 exe
+

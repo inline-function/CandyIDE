@@ -13,6 +13,7 @@ import java.io.File
 
 /** 自定义颜色 id（避开预定义池，见 EditorColorScheme 注释） */
 const val STRING_ID = 256
+const val DECORATED_ID = 257
 
 /** 语法 token 的可配置项：颜色 + 粗体/斜体标记（1=粗体 2=斜体 3=两者）。 */
 data class Scheme(
@@ -33,6 +34,7 @@ object Schemes {
         "function" to "函数名/箭头", "operator" to "运算符", "punctuation" to "标点", "identifier" to "标识符/变量",
         "type" to "类型/结构体/枚举", "parameter" to "形参/字段",
         "annotation" to "注解",
+        "decorated" to "@view/@compose 名（强调）",
         "problemError" to "错误下划线", "problemWarning" to "警告下划线", "problemTypo" to "提示下划线",
     )
 
@@ -54,6 +56,7 @@ object Schemes {
         "type" to EditorColorScheme.ATTRIBUTE_NAME,
         "parameter" to EditorColorScheme.ATTRIBUTE_VALUE,
         "annotation" to EditorColorScheme.ANNOTATION,
+        "decorated" to DECORATED_ID,
         "problemError" to EditorColorScheme.PROBLEM_ERROR,
         "problemWarning" to EditorColorScheme.PROBLEM_WARNING,
         "problemTypo" to EditorColorScheme.PROBLEM_TYPO,
@@ -79,6 +82,7 @@ object Schemes {
                 "punctuation" to 0xFF7F7F7D.toInt(),
                 "identifier" to 0xFF6A9BD2.toInt(),
                 "annotation" to 0xFF87B1FC.toInt(),
+                "decorated" to 0xFFFFD54F.toInt(),
                 "type" to 0xFF869D20.toInt(),
                 "parameter" to 0xFF0078FF.toInt(),
                 "problemError" to 0xFFFF5C8A.toInt(),
@@ -87,7 +91,7 @@ object Schemes {
             ),
             flags = mapOf(
                 "keyword" to 1, "number" to 1, "operator" to 1, "function" to 1,
-                "annotation" to 3, "punctuation" to 1, "type" to 1, "parameter" to 1,
+                "annotation" to 3, "decorated" to 1, "punctuation" to 1, "type" to 1, "parameter" to 1,
             ),
         ),
         Scheme(
@@ -108,6 +112,7 @@ object Schemes {
                 "punctuation" to 0xFF9AA5CE.toInt(),
                 "identifier" to 0xFF6A9BD2.toInt(),
                 "annotation" to 0xFFE0AF68.toInt(),
+                "decorated" to 0xFFE0AF68.toInt(),
                 "type" to 0xFF9D7CD8.toInt(),
                 "parameter" to 0xFFE5C07B.toInt(),
                 "problemError" to 0xFFF7768E.toInt(),

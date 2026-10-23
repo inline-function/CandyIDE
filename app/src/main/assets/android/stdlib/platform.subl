@@ -12,5 +12,6 @@
 @android @impure fun screenWidth(): Nat
 @android @impure fun screenHeight(): Nat
 @android @impure fun screenDensity(): Nat
+@android @impure fun fmtTime(ms: Nat): Str
 @android @impure fun installedApps(): List[Str]
 @android @impure fun pickFile(mime: Str, then: (Str) => Null): Null

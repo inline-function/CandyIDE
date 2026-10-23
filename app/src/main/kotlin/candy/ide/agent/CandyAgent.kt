@@ -96,6 +96,15 @@ class CandyAgent(private val ctx: Context) {
             if (text.isBlank()) continue
             sb.append("\n=== IDE 文档 ").append(name).append(" ===\n").append(text).append("\n")
         }
+                // 安卓文档：assets/builtin/android-doc
+        val androidNames = ctx.assets.list("builtin/android-doc")?.sorted() ?: emptyList()
+        for (name in androidNames) {
+            val text = runCatching {
+                ctx.assets.open("builtin/android-doc/" + name).bufferedReader().use { it.readText() }
+            }.getOrDefault("")
+            if (text.isBlank()) continue
+            sb.append("\n=== 安卓文档 ").append(name).append(" ===\n").append(text).append("\n")
+        }
         if (sb.isEmpty()) "" else "\n\n【Sublimation 语言文档与 IDE 文档（全量，工具调用时请参考）】\n" + sb
     }.getOrDefault("")
 

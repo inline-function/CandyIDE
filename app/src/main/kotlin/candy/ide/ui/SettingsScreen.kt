@@ -625,6 +625,18 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
+            item {
+                Surface(color = CandySurface, onClick = { vm.openBuiltinProject(ctx, "android-doc", "安卓文档") }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("安卓文档", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("安卓标准库（活动 · 布局 · 意图 · 平台能力）· 工具链", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.Default.MenuBook, contentDescription = null, tint = CandyTextDim, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
             item { SectionTitle("伴生软件") }
             item {
                 Surface(color = CandySurface, onClick = { TerminalBridge.download(ctx, TerminalBridge.Companion.SHIZUKU) }) {

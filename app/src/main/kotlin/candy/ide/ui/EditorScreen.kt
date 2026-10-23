@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -144,6 +145,11 @@ fun EditorScreen(vm: CandyViewModel) {
     var quickMenu by remember { mutableStateOf<LongPressMenu?>(null) }
     var diagInfo by remember { mutableStateOf<candy.ide.data.DiagItem?>(null) }
     var quickWord by remember { mutableStateOf<String?>(null) }
+    // @composable 布局预览悬浮窗：长按 composable 函数弹出；编辑该函数 1s 无错自动刷新
+    var composePreview by remember { mutableStateOf<candy.ide.ui.ComposePreviewState?>(null) }
+    var previewFullscreen by remember { mutableStateOf(false) }
+    // 编辑节拍：onTextChange 计数，防抖用于预览刷新
+    var textEditTick by remember { mutableIntStateOf(0) }
     var renameReq by remember { mutableStateOf<RenameRequest?>(null) }
     // 光标位置（SelectionChangeEvent 回调写入）：供诊断悬浮窗定位
     var cursorLine by remember { mutableIntStateOf(-1) }
@@ -503,7 +509,14 @@ fun EditorScreen(vm: CandyViewModel) {
                                 readOnly = isMdProject,
                                 onEditorReady = { editor = it },
                                 onLongPress = { x, y, line, col ->
-                                    longMenu = LongPressMenu(x, y, line, col)
+                                    // 命中 @composable 函数（名或体内）：直接弹布局预览悬浮窗，不进长按菜单
+                                    val pv = runCatching { vm.composePreviewState(line, col) }.getOrNull()
+                                    if (pv != null) {
+                                        composePreview = pv
+                                        previewFullscreen = false
+                                    } else {
+                                        longMenu = LongPressMenu(x, y, line, col)
+                                    }
                                 },
                                 completionLongClick = { label, kind ->
                                     val ed = editor ?: return@SoraEditorView
@@ -571,7 +584,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                     cursorCol = col
                                     sigTick++  // 触发签名提示重算（防抖在下面的 effect 里）
                                 },
-                                onTextChange = vm::onEditorTextChanged,
+                                onTextChange = { s -> textEditTick++; vm.onEditorTextChanged(s) },
                             )
                             // 转到定义的跳转消费
                             LaunchedEffect(active, vm.pendingGotoLine) {
@@ -593,6 +606,46 @@ fun EditorScreen(vm: CandyViewModel) {
                             val (ln, c) = cursorLine to cursorCol
                             sigLabel = withContext(kotlinx.coroutines.Dispatchers.Default) {
                                 runCatching { vm.computeSignatureHelp(ln, c) }.getOrNull()
+                            }
+                        }
+                        // 布局预览刷新：编辑（textEditTick 变化）后 1s 防抖；
+                        // 函数声明行范围内无 Error 诊断才刷新（用户规则：修改没错才更新）
+                        LaunchedEffect(textEditTick, composePreview?.fnName) {
+                            val pv = composePreview ?: return@LaunchedEffect
+                            if (textEditTick == 0) return@LaunchedEffect
+                            kotlinx.coroutines.delay(1000)
+                            val hasErr = vm.diagnostics.any { d ->
+                                d.severity >= DiagnosticRegion.SEVERITY_ERROR &&
+                                    d.line in pv.start..pv.end
+                            }
+                            if (hasErr) return@LaunchedEffect
+                            val next = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                runCatching { vm.composePreviewState(pv.start, 0) }.getOrNull()
+                            }
+                            if (next != null && next.fnName == pv.fnName) composePreview = next
+                        }
+                        // 悬浮窗本体：约为屏幕 1/5（比 1/4 略小）；全屏时填满
+                        composePreview?.let { pv ->
+                            Surface(
+                                modifier = Modifier
+                                    .align(androidx.compose.ui.Alignment.TopEnd)
+                                    .then(
+                                        if (previewFullscreen) Modifier.fillMaxSize()
+                                        else Modifier.fillMaxWidth(0.42f)
+                                    )
+                                    .heightIn(max = if (previewFullscreen) 4000.dp else 300.dp)
+                                    .padding(end = 8.dp, top = 4.dp),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                color = candy.ide.ui.theme.CandySurface,
+                                tonalElevation = 4.dp,
+                                shadowElevation = 10.dp,
+                            ) {
+                                candy.ide.ui.ComposePreviewPanel(
+                                    state = pv,
+                                    fullscreen = previewFullscreen,
+                                    onToggleFullscreen = { previewFullscreen = !previewFullscreen },
+                                    onClose = { composePreview = null; previewFullscreen = false },
+                                )
                             }
                         }
                         sigLabel?.let { label ->

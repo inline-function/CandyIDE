@@ -149,6 +149,8 @@ object JsApkBuilder {
         }
         tmp.inputStream().use { ins -> apk.outputStream().use { out -> ins.copyTo(out) } }
         ApkSigner.signV1(apk, entries)
+        // v2 块必装：Android 11+（含 MagicOS）没有 v2 块的 APK 直接判无签名
+        ApkSigner.signV2(apk)
         return apk
     }
 

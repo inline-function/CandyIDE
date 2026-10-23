@@ -11,4 +11,6 @@ data class DiagItem(
     val endLine: Int,
     val endChar: Int,
     val message: String,
+    /** 诊断代码（E-xxx / W-xxx），快速修正按代码分发 */
+    val code: String = "",
 )
