@@ -166,6 +166,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 // @android 声明的只读跳转：android/stdlib 也交给 LSP
                 val androidStd = File(Engine.root(getApplication()), "android/stdlib")
                 if (androidStd.isDirectory) setAndroidStdlibDir(androidStd)
+                // 安卓处理器脚本（allMut/android/composable/view）：编辑期跑处理器后再检查，与编译链同构
+                val androidProcs = File(Engine.root(getApplication()), "android/procs")
+                if (androidProcs.isDirectory) setAndroidProcsDir(androidProcs)
             }
         }.onFailure {
             mdLog("**[语言服务]** 初始化失败 · " + (it.message ?: it.javaClass.simpleName))
@@ -1850,7 +1853,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     // ───────── 原生安卓工程（SfA 模式）：注解处理器 + 安卓标准库 + core ─────────
     /** assets/android 物化版本：处理器/安卓标准库更新后递增 */
-    private val androidAssetVersion = 3
+    private val androidAssetVersion = 4
 
     /** 释放 assets/android（处理器 .subs + 安卓标准库 .subl）到 files/candy/android */
     fun androidBootstrap(): Boolean = runCatching {
