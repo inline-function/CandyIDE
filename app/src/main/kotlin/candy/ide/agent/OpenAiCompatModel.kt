@@ -49,8 +49,19 @@ class OpenAiCompatModel(
         val withV1 = if (base.isEmpty() || android.net.Uri.parse(base).path?.trim('/')?.isEmpty() != false) base + "/v1" else base
         val endpoint = withV1 + "/chat/completions"
         if (!streamMode) {
-            // 非流式：整包解析后 emit 一次
-            val parts = parseResponse(postJson(endpoint, payload))
+            // 非流式：整包解析；若带 reasoning_content 先推一条 think 增量（finishReason=null）
+            val raw = postJson(endpoint, payload)
+            val reason = runCatching {
+                JSONObject(raw).optJSONArray("choices")?.optJSONObject(0)
+                    ?.optJSONObject("message")?.optString("reasoning_content")
+            }.getOrDefault("")
+            if (!reason.isNullOrEmpty()) {
+                emit(LlmResponse(
+                    content = Content(parts = listOf(Part(text = "§think§" + reason)), role = "model"),
+                    finishReason = null,
+                ))
+            }
+            val parts = parseResponse(raw)
             emit(LlmResponse(content = Content(parts = parts, role = "model"), finishReason = FinishReason.STOP))
             return@flow
         }
@@ -70,6 +81,7 @@ class OpenAiCompatModel(
             val code = conn.responseCode
             val src = if (code in 200..299) conn.inputStream else conn.errorStream
             val content = StringBuilder()
+            val reasonAccum = StringBuilder()
             val toolArgs = mutableMapOf<Int, StringBuilder>()
             val toolNames = mutableMapOf<Int, String>()
             var finish = ""
@@ -89,6 +101,17 @@ class OpenAiCompatModel(
                                         content.append(piece)
                                         emit(LlmResponse(
                                             content = Content(parts = listOf(Part(text = piece)), role = "model"),
+                                            finishReason = null,
+                                        ))
+                                    }
+                                    // 思考链（DeepSeek 系/兼容端点用 reasoning_content，部分用 reasoning）：
+                                    // 只走旁路（§think§ 前缀），绝不进 content累加器——否则会落进会话历史回传给模型
+                                    val reason = delta.optString("reasoning_content")
+                                        .ifEmpty { delta.optString("reasoning") }
+                                    if (reason.isNotEmpty()) {
+                                        reasonAccum.append(reason)
+                                        emit(LlmResponse(
+                                            content = Content(parts = listOf(Part(text = "§think§" + reason)), role = "model"),
                                             finishReason = null,
                                         ))
                                     }
@@ -112,7 +135,7 @@ class OpenAiCompatModel(
             }
             if (code !in 200..299) throw RuntimeException("HTTP $code（SSE）")
             // 一个块都没收到（非标准 SSE 或网关忽略 stream）-> 回退整包再请求一次
-            if (content.isEmpty() && toolNames.isEmpty()) {
+            if (content.isEmpty() && toolNames.isEmpty() && reasonAccum.isEmpty()) {
                 android.util.Log.w("CandyAgent", "sse empty, falling back to non-stream")
                 val parts = parseResponse(postJson(endpoint, payload.put("stream", false)))
                 emit(LlmResponse(content = Content(parts = parts, role = "model"), finishReason = FinishReason.STOP))

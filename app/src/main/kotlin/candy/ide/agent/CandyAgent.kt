@@ -20,6 +20,7 @@ import org.json.JSONObject
  * CandyIDE 的 AI agent：对话循环 + 工具调用，UI 事件用自定义 author 约定区分：
  *  - "user"     用户消息（UI 直接渲染）
  *  - "chunk"    流式增量块（同一气泡逐字增长，author=chunk 绕过持久化）
+ *  - "think"    思考链增量块（reasoning_content 旁路，UI 展示思考过程，不持久化）
  *  - "tool"     工具调用开始/结束（带 toolName，UI 渲染折叠气泡）
  *  - "model"    一轮的最终回答（落进 session 历史）
  *
@@ -165,7 +166,12 @@ class CandyAgent(private val ctx: Context) {
                         val piece = r.content?.parts?.mapNotNull { it.text }?.joinToString("") ?: ""
                         val hasCalls = r.content?.parts?.any { it.functionCall != null } == true
                         if (piece.isNotEmpty() && r.finishReason == null && !hasCalls) {
-                            emit(eventOf(Content(parts = listOf(Part(text = piece)), role = "model"), author = "chunk"))
+                            if (piece.startsWith("§think§")) {
+                                // 思考链：单独通道，落 UI 的「思考」气泡，不写历史
+                                emit(eventOf(Content(parts = listOf(Part(text = piece.removePrefix("§think§"))), role = "model"), author = "think"))
+                            } else {
+                                emit(eventOf(Content(parts = listOf(Part(text = piece)), role = "model"), author = "chunk"))
+                            }
                         }
                         // 含工具调用或已完成的块覆盖累积结果
                         if (hasCalls || r.finishReason != null) resp = r

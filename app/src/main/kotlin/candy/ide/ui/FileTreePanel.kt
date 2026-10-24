@@ -96,6 +96,8 @@ fun FileTreePanel(
     val readOnly = project != null && ProjectStore.isBuiltin(project)
     ModalDrawerSheet(modifier = Modifier.width(300.dp).background(CandySurface)) {
     Box(modifier = Modifier.fillMaxSize().then(if (menuNode != null) Modifier.clickable { menuNode = null } else Modifier)) {
+        // 内容必须纵向排列：直接放 Box 里会全部锚定左上 → 标题与根目录重叠
+        Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -193,6 +195,7 @@ fun FileTreePanel(
                     )
                 }
             }
+        }
         }
         // 长按文件/目录：快捷操作菜单（非对话框，定位到按压点；在 sheet 内悬浮）
         menuNode?.let { mm ->

@@ -612,13 +612,28 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     val body = ev.content?.parts?.mapNotNull { it.text }?.joinToString("") ?: ""
                     when (author) {
                         "user" -> {}  // 用户气泡已在上方直接添加，跳过回声
+                        "think" -> {
+                            // 思考链增量：把思考占位气泡变成实时增长的推理内容（保留加载图标）
+                            val last = chat.lastOrNull()
+                            if (last != null && last.thinking) {
+                                last.reasoning = true
+                                last.append(body)
+                            } else {
+                                val tb = ChatMessage(ChatMessage.Role.MODEL, body)
+                                tb.reasoning = true
+                                chat.add(tb)
+                            }
+                        }
                         "chunk" -> {
                             // 流式增量：追加到最后一条助手气泡（若末尾是思考气泡则转成正文）
                             val last = chat.lastOrNull()
-                            if (last != null && last.role == ChatMessage.Role.MODEL) {
+                            if (last != null && last.role == ChatMessage.Role.MODEL && !last.reasoning) {
                                 if (last.thinking) { last.thinking = false; last.text = "" }
                                 if (last.toolName != null) return@collect
                                 last.append(body)
+                            } else {
+                                // 末尾是思考链气泡：正文另起新气泡
+                                chat.add(ChatMessage(ChatMessage.Role.MODEL, body))
                             }
                         }
                         "tool_start" -> {
@@ -626,8 +641,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                             agentStage.value = "调用工具 " + body + "…"
                             val last = chat.lastOrNull()
                             if (last != null && last.thinking) {
-                                // 思考气泡让位给工具气泡
-                                chat.removeAt(chat.lastIndex)
+                                // 思考气泡让位给工具气泡；思考链气泡保留正文，只停加载图标
+                                if (last.reasoning) last.thinking = false
+                                else chat.removeAt(chat.lastIndex)
                             }
                             val tb = ChatMessage(ChatMessage.Role.TOOL, "", body)
                             tb.thinking = true
@@ -659,7 +675,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                             if (body.isBlank()) return@collect
                             // 最终回答：落到最后的助手气泡（取代流式累积或思考占位）
                             val last = chat.lastOrNull()
-                            if (last != null && last.role == ChatMessage.Role.MODEL && last.toolName == null) {
+                            if (last != null && last.role == ChatMessage.Role.MODEL && last.toolName == null && !last.reasoning) {
                                 last.thinking = false
                                 last.text = body
                             } else {
@@ -675,9 +691,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 agentBusy.value = false
                 agentStage.value = ""
-                // 收尾：残留的思考气泡（模型未输出任何正文）清掉
+                // 收尾：残留的思考占位气泡（模型未输出任何正文）清掉；
+                // 思考链气泡保留正文，只停加载图标
+                for (m in chat) if (m.reasoning) m.thinking = false
                 val last = chat.lastOrNull()
-                if (last != null && last.thinking) chat.removeAt(chat.lastIndex)
+                if (last != null && last.thinking && !last.reasoning) chat.removeAt(chat.lastIndex)
                 onAgentTurnDone()
             }
         }
@@ -698,7 +716,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         stopAgent()
         if (chat.isNotEmpty()) {
             val first = chat.firstOrNull { it.role == ChatMessage.Role.USER }?.text ?: "对话"
-            conversations.add(0, AgentConversation(System.currentTimeMillis(), first, chat.toList()))
+            conversations.add(0, AgentConversation(System.currentTimeMillis(), first, chat.toList().filter { !it.reasoning }))
             saveConversations(ctx)
         }
         chat.clear()
@@ -711,7 +729,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         stopAgent()
         if (chat.isNotEmpty()) {
             val first = chat.firstOrNull { it.role == ChatMessage.Role.USER }?.text ?: "对话"
-            conversations.add(0, AgentConversation(System.currentTimeMillis(), first, chat.toList()))
+            conversations.add(0, AgentConversation(System.currentTimeMillis(), first, chat.toList().filter { !it.reasoning }))
         }
         conversations.remove(conv)
         chat.clear()
@@ -2488,12 +2506,15 @@ fun main(): Null {
 /** agent 聊天消息
  *  - [toolName] 非空表示工具气泡：折叠时显示已读取文件式摘要，展开显示参数与结果
  *  - [thinking] 思考中：带加载图标与阶段文案（读取文件/编辑文件…），位于对话流中而非顶栏
- *  - [collapsed] 工具气泡默认折叠 */
+ *  - [collapsed] 工具气泡默认折叠
+ *  - [reasoning] 思考链气泡：模型的 reasoning_content 逐块增长，完事后可展开回看 */
 class ChatMessage(val role: Role, initial: String, val toolName: String? = null) {
     enum class Role { USER, MODEL, TOOL }
     // 字段可观察：流式块逐字追加 / 思考态切换 / 折叠态切换都会触发气泡重组
     var text by androidx.compose.runtime.mutableStateOf(initial)
     var thinking by androidx.compose.runtime.mutableStateOf(false)
+    /** 思考链气泡：reasoning_content 实时增长，生成完折叠为「思考过程」 */
+    var reasoning by androidx.compose.runtime.mutableStateOf(false)
     var collapsed by androidx.compose.runtime.mutableStateOf(true)
     var done by androidx.compose.runtime.mutableStateOf(false)
     /** 流式块追加（同一气泡逐字增长） */

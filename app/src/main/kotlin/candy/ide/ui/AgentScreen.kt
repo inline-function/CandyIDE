@@ -428,8 +428,29 @@ private fun ChatBubble(msg: ChatMessage, onPickOption: (String) -> Unit) {
                     )
                     Spacer(Modifier.size(4.dp))
                 }
+                // 思考链气泡：reasoning_content 实时增长（加载图标 + 末尾若干行），完成后折叠为「思考过程」
+                if (msg.reasoning) {
+                    var expanded by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (msg.thinking) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
+                            Spacer(Modifier.size(6.dp))
+                            Text("思考中…", color = CandyTextDim, fontSize = 12.sp)
+                        } else {
+                            Text(if (expanded) "▼ 思考过程" else "▶ 思考过程", color = CandyTextDim, fontSize = 11.sp,
+                                modifier = Modifier.ballClick { expanded = !expanded })
+                        }
+                    }
+                    // 进行中：直接显示链条（限高，随增长刷新，证明没卡死）；完成后折叠、点开看全文
+                    if (msg.thinking || expanded) {
+                        Spacer(Modifier.size(4.dp))
+                        Text(msg.text, color = CandyTextDim, fontSize = 11.sp,
+                            maxLines = if (msg.thinking) 16 else 60,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                }
                 // 思考中： ConversationFlow 里的占位气泡（加载图标 + 阶段文案）
-                if (msg.thinking) {
+                else if (msg.thinking) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CandyPrimary, strokeWidth = 2.dp)
                         Spacer(Modifier.size(6.dp))
