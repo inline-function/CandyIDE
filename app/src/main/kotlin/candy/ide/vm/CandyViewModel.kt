@@ -155,8 +155,20 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     // 语言服务：进程内直连 sublimation 的 LspAnalysis（零子进程、零 JSON-RPC）
     private val lspLock = Any()
     @Volatile private var lsp: LspAnalysis? = null
+    /** 最近一次已同步给 LSP 的正文指纹（onAnalyzed 后台线程写）：主线程查询前比对，
+     *  未变化就直接复用 LSP 内部状态，不再重复全量解析 */
+    @Volatile private var lspSyncedName: String? = null
+    @Volatile private var lspSyncedHash: Int = 0
     /** LSP 已完成至少一轮分析（拿到诊断/tokens）才解锁补全与跳转，避免空文档期空表 */
     val lspReady = MutableStateFlow(false)
+
+    /** 主线程查询前的文档同步：正文指纹一致时复用后台分析结果（零解析，防 UI 卡顿）；
+     *  不一致时才补一次全量（极端兜底）。编辑器高频事件（回车缩进等）走这条。 */
+    private fun ensureSynced(analysis: LspAnalysis, name: String, text: String) {
+        if (lspSyncedName == name && lspSyncedHash == text.hashCode()) return
+        runCatching { analysis.updateDocument(name, text) }
+        lspSyncedName = name; lspSyncedHash = text.hashCode()
+    }
 
     fun analysis(): LspAnalysis? = synchronized(lspLock) {
         lsp ?: runCatching {
@@ -187,6 +199,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         var tokens: List<Int>? = null
         try {
             analysis.updateDocument(name, text)
+            lspSyncedName = name; lspSyncedHash = text.hashCode()
             // updateDocument 本身就是一次完整分析（parse+check+collect）；能拿到诊断即语义就绪
             tokens = runCatching { analysis.semanticTokens(name) }.getOrNull()
             lspReady.value = true
@@ -241,7 +254,6 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 androidBootstrap()
                 Settings.attach(getApplication())
                 candy.ide.git.GitManager.appCtx = getApplication()
-                seedDemo()
                 schemeVersion.intValue++
             } catch (e: Throwable) {
                 mdLog("**[引擎]** 初始化失败 · " + (e.message ?: e.javaClass.simpleName))
@@ -263,13 +275,14 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 ProjectStore.writeType(dir, type)
                 when (type) {
                     // 安卓工程（SfA 原生链）：@android 内建 + @composable 视图树样板
-                    ProjectStore.TYPE_JSAPK -> dir.child("main.subl").writeText(ANDROID_DEMO_SOURCE)
+                    // 安卓工程（SfA 原生链）：最小 @composable 视图树骨架
+                    ProjectStore.TYPE_JSAPK -> dir.child("main.subl").writeText(JSAPK_TEMPLATE)
                     ProjectStore.TYPE_SCRIPT -> dir.child("hello.subs").writeText(SCRIPT_DEMO_SOURCE)
                                     // md 文档工程：只有 md 文件，不含可执行代码
                     ProjectStore.TYPE_MD -> {
                         dir.child("index.md").writeText("# " + name + "\n\n在这里写文档。左侧文件树可继续新增 .md。\n\n- 支持：标题 / 列表 / 代码块 / 引用 / 链接\n- 长按顶栏运行按钮可打包成文档 APK\n")
                     }
-                    else -> dir.child("hello.subl").writeText(DEMO_SOURCE)
+                    else -> dir.child("hello.subl").writeText(JS_TEMPLATE)
                 }
                 // 自动初始化 git 仓库（Termux 未装/git 未就绪时静默跳过，进 git 页会引导）
                 viewModelScope.launch(Dispatchers.IO) {
@@ -1233,6 +1246,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         if (dir.find("jsapk.json")?.isFile() == true) { buildApkIn(dir); return }
         if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) {
             // 原生安卓工程（无 jsapk.json）：SfA 链 —— 处理器/编译 → 壳模板注 JS → v1 签名 → 安装
+            running.value = true
             try {
                 val entry = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
                     ?: throw RuntimeException("工程里没有 .subl 入口")
@@ -1242,8 +1256,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 val seed = cfg.pkgSeed.ifBlank { asciiPackageSeed(dir.name) }
                 val pkg = "functor.sublimation." + seed
                 val apk = candy.ide.jsapk.AndroidApkBuilder.build(getApplication(), js, dir, cfg)
-                mdLogUser("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
-                mdLogUser("**[打包]** 包名 " + pkg + (if (cfg.label.isNotBlank()) " · 应用名 " + cfg.label else "") + (if (cfg.icon.isNotBlank()) " · 自定义图标" else "") + (if (cfg.keystore.isNotBlank()) " · 自定义签名" else ""))
+                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
+                mdLog("**[打包]** 包名 " + pkg + (if (cfg.label.isNotBlank()) " · 应用名 " + cfg.label else "") + (if (cfg.icon.isNotBlank()) " · 自定义图标" else "") + (if (cfg.keystore.isNotBlank()) " · 自定义签名" else ""))
                 main.post { runFailed.value = false }
                 if (Settings.silentInstall) installPkg(apk, pkg)
                 else main.post {
@@ -1251,7 +1265,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                     pendingApk.value = apk
                 }
             } catch (e: Throwable) {
-                mdLogUser("**[打包失败]** " + ((e as? RuntimeException)?.message ?: e.message ?: e.javaClass.simpleName).substringBefore("\n").take(400))
+                mdLog("**[打包失败]** " + ((e as? RuntimeException)?.message ?: e.message ?: e.javaClass.simpleName).substringBefore("\n").take(400))
                 mdLog("**[堆栈]** " + e.stackTraceToString().take(1200).replace("\n", " | "))
                 main.post { runFailed.value = true }
             } finally {
@@ -1269,7 +1283,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun buildApk() {
         val dir = currentProject.value ?: return
         if (running.value) return
-        running.value = true
+        // running 由各打包分支自己置位：这里先置位会让 buildApkIn 等的防重入守卫
+        // （if (running.value) return）立即退出，running 永不复位 → 运行按钮一直转圈
         openDrawerTab(1)
         // 编译 + zip + 签名动辄数秒：务必离线主线程，否则长按按钮会卡死
         io.execute { buildApkProject(dir) }
@@ -2213,7 +2228,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         if (text.length > MAX_LSP_SOURCE) return null
         val analysis = analysis() ?: return null
         return runCatching {
-            analysis.updateDocument(name, text)
+            ensureSynced(analysis, name, text)
             analysis.onTypeFormattingEdits(name, Position(targetLine, 0), "\n")
         }.getOrNull()
     }
@@ -2227,7 +2242,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val analysis = analysis() ?: return null
         return runCatching {
             // LSP 的所有查询都基于 updateDocument 后的正文；先同步再取 edits
-            analysis.updateDocument(name, text)
+            ensureSynced(analysis, name, text)
             val pos = Position(line, column)
             if (analysis.prepareRenameFor(name, pos) == null) return@runCatching RenameResult(false, emptyList())
             val changes = analysis.renameFor(name, pos, newName) ?: return@runCatching RenameResult(false, emptyList())
@@ -2267,9 +2282,10 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val name = f.name
         if (!name.endsWith(".subl") && !name.endsWith(".subs")) return null
         val analysis = analysis() ?: return null
-        return runCatching {
-            analysis.updateDocument(name, loadTextFor(f))
-            val json = analysis.composableTreeJson(name, sugared.functor.lsp.Position(line, col)) ?: return null
+        val res = runCatching {
+            ensureSynced(analysis, name, savedTexts[f.key] ?: loadTextFor(f))
+            val json = analysis.composableTreeJson(name, sugared.functor.lsp.Position(line, col))
+            if (json == null) return@runCatching null
             val o = org.json.JSONObject(json)
             candy.ide.ui.ComposePreviewState(
                 fnName = o.optString("name"),
@@ -2277,7 +2293,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 end = o.optInt("end"),
                 treeJson = json,
             )
-        }.getOrNull()
+        }
+        return res.getOrNull()
     }
     /** 虚拟桥接环境入口：layout(根组合函数) 调用 → 找到 @composable 函数 → 全屏渲染模拟
      *  仅渲染不运行：应用点击事件被拦截（按钮不触发 onClick）
@@ -2327,33 +2344,22 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     /** 进入预览全屏页（树来自当前编辑器的 @composable 函数） */
     fun openComposePreviewFull(pv: candy.ide.ui.ComposePreviewState) {
         composePreviewFull.value = pv
-        screen.value = Screen.Preview
+        screen.value = candy.ide.ui.Screen.Preview
     }
     /** 预览全屏页写回源码：保留函数签名行（含 @composable），替换函数体；编辑器返回后按新正文重载 */
-    fun applyPreviewTree(treeJson: String) {
-        val pv = composePreviewFull.value ?: return
+        /** 预览全屏页写回源码：只对改动节点做精确补丁（属性就地改、新增插入、删节点删行），保留函数体其余部分 */
+    fun applyPreviewTree(treeJson: String, pv: candy.ide.ui.ComposePreviewState) {
         val f = currentFile.value ?: return
         runCatching {
-            val tree = org.json.JSONObject(treeJson)
             val content = loadTextFor(f)
             if (content.isEmpty()) return
-            val ls = content.split("\n").toMutableList()
-            var sig = (pv.start - 1).coerceIn(0, ls.size - 1)
-            while (sig < ls.size && !ls[sig].contains("{")) sig++
-            if (sig >= ls.size) return
-            val endIdx = (pv.end - 1).coerceIn(sig, ls.size - 1)
-            val head = ls.subList(0, sig + 1)
-            val tail = if (endIdx + 1 < ls.size) ls.subList(endIdx + 1, ls.size) else emptyList()
-            val out = ArrayList<String>(head)
-            out += candy.ide.ui.PreviewCodeGen.bodyLines(tree)
-            out += "}"
-            out += tail
-            val newText = out.joinToString("\n")
+            val newText = candy.ide.vm.PreviewPatch.apply(content, pv.treeJson, treeJson) ?: return
             saveCurrent(newText)
             // 编辑器立即以新正文重载（回到编辑器页就能看到写回的函数体）
             forceReloadNonce.intValue++
-        }
+        }.onFailure { mdLogUser("**[预览写回失败]** " + (it.message ?: it.javaClass.simpleName)) }
     }
+
 
     /** 灯泡：当前文件可用的快速修正（LSP codeActions） */
     data class QuickFix(
@@ -2369,7 +2375,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         val name = f.name
         val text = savedTexts[f.key] ?: f.readText()
         val analysis = runCatching { analysis() }.getOrNull() ?: return false
-        analysis.updateDocument(name, text)
+        ensureSynced(analysis, name, text)
         val edits = analysis.formatDocument(name) ?: return false
         if (edits.isEmpty()) return false   // 无需改动
         pendingFormatEdits.clear()
@@ -2379,13 +2385,17 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 快速修正：按光标处的诊断取 codeActionsFor（诊断驱动：全角符号、纯调非纯等） */
+    /** 诊断短名（诊断页标题用）：LSP 未收录的 code 返回 null */
+    fun diagTitleOf(code: String): String? =
+        runCatching { LspAnalysis.diagTitleOf(code) }.getOrNull()
+
     fun quickFixes(line: Int, col: Int): List<QuickFix> {
         val f = currentFile.value ?: return emptyList()
         val name = f.name
         if (!name.endsWith(".subl") && !name.endsWith(".subs")) return emptyList()
         val analysis = analysis() ?: return emptyList()
         return runCatching {
-            analysis.updateDocument(name, loadTextFor(f))
+            ensureSynced(analysis, name, savedTexts[f.key] ?: loadTextFor(f))
             val range = if (line < 0) null else sugared.functor.lsp.Range(
                 sugared.functor.lsp.Position(line, col),
                 sugared.functor.lsp.Position(line, col),
@@ -2398,6 +2408,15 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }.getOrDefault(emptyList())
+    }
+
+
+    /** 待编辑器消费的快速修正（诊断卡长按设置；编辑器在 LaunchedEffect 里批量写回） */
+    val pendingQuickFix = mutableStateListOf<QuickFix>()
+
+    fun applyQuickFix(fix: QuickFix) {
+        if (fix.command != null) { mdLogUser("**[快速修正]** " + fix.title); return }
+        pendingQuickFix.add(fix)
     }
 
     private val logFile: File by lazy { File(Engine.root(getApplication()), "logs/ide.log") }
@@ -2435,209 +2454,34 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     var pendingGotoLine by mutableIntStateOf(-1)
         internal set
     internal fun requestGoto(line: Int) { pendingGotoLine = line.coerceAtLeast(0) }
-    fun consumeGoto() { pendingGotoLine = -1 }
-
-    /** SAF 落盘重试：新建文件后立即 writeText 偶发写空（openOutputStream 返回 null 被静默跳过）。
-     *  写完读回校验，不一致就等 200ms 重试，最多 10 次。用于内置工程的种子写入。 */
-    private fun CandyPath.writeTextVerified(text: String): Boolean {
-        repeat(10) {
-            runCatching { writeText(text) }
-            val back = runCatching { readText() }.getOrNull() ?: ""
-            if (back == text) return true
-            Thread.sleep(200)
-        }
-        return false
-    }
-    /** 保证 demo 工程存在且是最新示例；旧脚本版种子自动迁移为编译模式版。 */
-    private fun seedDemo() {
-        val projects = ProjectStore.projectsRoot(getApplication())
-        val demo = projects.find("demo") ?: projects.createDirectory("demo") ?: return
-        // 内容是旧编译版/旧脚本版才替换；被用户改动过的原样保留
-        if (demo.find("hello.subl")?.readText() == OLD_COMPILE_DEMO) demo.find("hello.subl")?.delete()
-        val legacy = demo.find("hello.subs")
-        if (legacy != null) {
-            val lc = legacy.readText()
-            if (lc == OLD_SCRIPT_DEMO || lc == OLD_SCRIPT_DEMO2) {
-                legacy.delete()
-                demo.find("hello.subl")?.delete()
-            } else legacy.renameTo(demo.child("hello.subl"))
-        }
-        // 每次都重新解析：删除后旧 CandyPath 句柄失效（SAF uri 指向已删文档）
-        val current = demo.find("hello.subl") ?: demo.child("hello.subl")
-        if (current.length() == 0L) {
-            if (current.writeTextVerified(DEMO_SOURCE)) mdLogUser("**[内置示例]* 已释放 demo 工程")
-            else mdLogUser("**[内置示例]* demo 工程写入失败")
-        }
-        // 用药助手示例工程（首次释放；main.subl 被改动过则原样保留）
-        runCatching {
-            val med = projects.find("med") ?: projects.createDirectory("med") ?: return@runCatching
-            if (med.find("main.subl")?.readText() == ANDROID_DEMO_SOURCE) med.find("main.subl")?.delete()
-            val medMain = med.find("main.subl") ?: med.child("main.subl")
-            if (medMain.length() == 0L) {
-                if (medMain.writeTextVerified(MED_SOURCE)) mdLogUser("**[内置示例]* 已释放「用药助手」工程")
-                else mdLogUser("**[内置示例]*「用药助手」工程写入失败")
-            }
-        }
-        refreshProjects()
-    }
+    internal fun consumeGoto() { pendingGotoLine = -1 }
 
     companion object {
         private const val MAX_LSP_SOURCE = 40_000
 
-        // 旧编译版示例（检测到就替换为简化版）
-        private const val OLD_COMPILE_DEMO = """// Sublimation 编译示例 —— 点右上角「运行」编译成 JS 并执行
-fun main() {
-  unchecked print("Hello, Sublimation!")
-  var add = { x -> x + 1 }
-  unchecked print(add(41))
-  var p = (3, 4)
-  var (a, b) = p
-  unchecked print(a + b)
-}
-"""
-
-        private const val DEMO_SOURCE = """@impure
-fun main() =
-    print("hello,world!")
-"""
-        // 原生安卓工程示例（SfA）：@android 内建 + @composable 视图树
-        private const val ANDROID_DEMO_SOURCE = """@impure
-fun main(): Null {
-    onCreate {
-        unchecked log("Sublimation app started", 2)
-    }
-    onStart {
-        layout(content)
-    }
-}
-
-@composable
-fun content(_e: Any): Box {
-    @mut var n = 0
-    @mut var label = Text(text = "count: 0")
-    return Box(modifier = Plain(), contentAlignment = Center()) {
-        Box(modifier = Plain()) {
-            Button(onClick = { n = n + 1; label.text = concat("count: ", toStr(n)) }) {
-                label
-            }
-        }
-    }
-}
-"""
-        // 用药助手示例（标签备忘录式用药记录）：视图树 + storage 持久化 + Chart 柱状图
-        private const val MED_SOURCE = """// 用药助手 —— 添加：药名 + 剂量 + 当前时间；列表展示；柱状图统计
-@impure
-fun main(): Null {
-    onCreate {
-        unchecked log("medready started", 2)
-    }
-    onStart {
-        layout(content)
-    }
-}
-
-@composable
-fun content(): Box {
-    @mut var nameField = TextField(placeholder = "药名")
-    @mut var amountField = TextField(placeholder = "剂量，如 1 片")
-    @mut var status = Text(text = "共 0 条")
-    @mut var rows = rowsView(emptyList())
-    @mut var chart = chartView(emptyList())
-    @mut var meds: List[Str] = emptyList()
-    @mut var curTime: Str = ""
-    return Box(modifier = Plain()) {
-        Box(modifier = Plain()) {
-            Text(text = "用药助手", size = 22, bold = true)
-        }
-        Box(modifier = Plain()) { nameField }
-        Box(modifier = Plain()) { amountField }
-        Box(modifier = Plain(), orientation = "horizontal") {
-            Button(onClick = {
-                unchecked curTime = nowStr()
-                meds = makeDose(meds, nameField.text, amountField.text, curTime)
-                unchecked storagePut("meds", joinSemicolon(meds))
-                status.text = concat(concat("共 ", toStr(size(meds))), " 条")
-                rows = rowsView(meds)
-                chart = chartView(meds)
-                nameField.text = ""
-                amountField.text = ""
-            }) {
-                Text(text = "＋ 添加")
-            }
-            Button(onClick = {
-                meds = emptyList()
-                unchecked storagePut("meds", "")
-                status.text = "共 0 条"
-                rows = rowsView(emptyList())
-                chart = chartView(emptyList())
-            }) {
-                Text(text = "清空")
-            }
-        }
-        Box(modifier = Plain()) { status }
-        Box(modifier = Plain()) { rows }
-        Box(modifier = Plain()) { chart }
-    }
-}
-
-@composable fun chartView(meds: List[Str]): Chart = Chart(points = chartPoints(meds), labels = chartLabels(meds), kind = "bar")
-
-fun makeDose(cur: List[Str], name: Str, amount: Str, t: Str): List[Str] =
-    cons(concat(concat(concat(name, " | "), amount), concat(" | ", t)), cur)
-
-fun chartPoints(meds: List[Str]): List[Rat] = map(meds) { m => 1.0 }
-
-fun chartLabels(meds: List[Str]): List[Str] = map(meds) { m =>
-    substring(m, 0, if (length(m) < 2) length(m) else 2)
-}
-
-fun joinSemicolon(xs: List[Str]): Str = when(xs) {
-    Nil => ""
-    is Cons(h, Nil) => h
-    is Cons(h, t) => concat(concat(h, ";"), joinSemicolon(t))
-}
-
-fun reverse(xs: List[Str]): List[Str] = when(xs) {
-    Nil => Nil()
-    is Cons(h, t) => append(reverse(t), cons(h, Nil()))
-}
-
-@composable fun rowsView(meds: List[Str]): Box = Box(modifier = Plain()) {
-    rowsBody(reverse(meds))
-}
-
-@composable fun rowsBody(xs: List[Str]): Any = when(xs) {
-    Nil => Box(modifier = Plain()) {}
-    is Cons(m, rest) => Box(modifier = Plain(), orientation = "vertical") {
-        Text(text = m, size = 15)
-        rowsBody(rest)
-    }
-}
-
-@impure fun nowStr(): Str {
-    unchecked var ms = timeNow()
-    var s = fmtTime(ms)
-    return s
-}
-"""
-
-        // 脚本模式时期的旧种子内容（检测到就迁移为新的编译模式示例）
-        private const val OLD_SCRIPT_DEMO = """// Sublimation 脚本示例 —— 点右上角「运行」试试
-var xs = listOf(1, 2, 3)
-print("Hello, Sublimation!")
-print(xs.map({ x => x + 1 }).size())
-print(xs.isEmpty())
-"""
-
-        private const val OLD_SCRIPT_DEMO2 = """// Sublimation 脚本示例 —— 顶层语句直接执行，无需 main
-print("Hello, Sublimation!")
-print(40 + 2)
-var name = "CandyIDE"
-print("从 " + name + " 运行")
-"""
 
         private const val SCRIPT_DEMO_SOURCE = """print("hello,world!")
 """ 
+
+        // 新建安卓工程的最小骨架：一个 @composable 函数 + layout 挂载
+        private const val JSAPK_TEMPLATE = """@composable
+fun content(): Box {
+    return Box(modifier = Plain()) {
+        Text(text = "hello", size = 16)
+    }
+}
+
+fun main(): Null {
+    onCreate { unchecked log("started", 1) }
+    onStart { layout(content) }
+}
+"""
+
+        // 新建 JS 工程的最小骨架
+        private const val JS_TEMPLATE = """fun main() {
+  unchecked print("Hello, Sublimation!")
+}
+"""
     }
 }
 

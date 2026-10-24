@@ -22,6 +22,15 @@ object PreviewCodeGen {
         return out
     }
 
+    /** 单节点源码（插入用）：行集合，容器节点带子节点 */
+    fun nodeSource(node: JSONObject, indent: Int): List<String> = nodeLines(node, indent)
+
+    /** 单行形式（插进 children = listOf(...) 实参用） */
+    fun nodeInline(node: JSONObject): String {
+        val lines = nodeLines(node, 0).joinToString(" ")
+        return lines.replace("\n", " ")
+    }
+
     private fun nodeLines(node: JSONObject, indent: Int): List<String> {
         val pad = "    ".repeat(indent)
         val name = node.optString("name")

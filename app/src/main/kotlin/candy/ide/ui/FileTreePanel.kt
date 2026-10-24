@@ -2,6 +2,11 @@ package candy.ide.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
@@ -10,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -17,11 +23,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowRight
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -77,7 +82,7 @@ fun FileTreePanel(
     var newNameDialog by remember { mutableStateOf<NewNodeRequest?>(null) }
     var renamingNode by remember { mutableStateOf<TreeNode?>(null) }
     var pendingDelete by remember { mutableStateOf<TreeNode?>(null) }
-    var menuNode by remember { mutableStateOf<TreeNode?>(null) }
+    var menuNode by remember { mutableStateOf<TreeNodeMenu?>(null) }
     var pendingDeleteMulti by remember { mutableStateOf<List<candy.ide.fs.CandyPath>?>(null) }
     var pendingZip by remember { mutableStateOf<candy.ide.fs.CandyPath?>(null) }
     var openWithNode by remember { mutableStateOf<TreeNode?>(null) }
@@ -87,7 +92,10 @@ fun FileTreePanel(
     var multiMode by remember { mutableStateOf(false) }
     val multiSet = remember { androidx.compose.runtime.mutableStateListOf<candy.ide.fs.CandyPath>() }
 
+    // 只读工程（内置工程）：禁止增删改，只留打开与复制路径
+    val readOnly = project != null && ProjectStore.isBuiltin(project)
     ModalDrawerSheet(modifier = Modifier.width(300.dp).background(CandySurface)) {
+    Box(modifier = Modifier.fillMaxSize().then(if (menuNode != null) Modifier.clickable { menuNode = null } else Modifier)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -107,7 +115,7 @@ fun FileTreePanel(
                 if (!multiMode) multiSet.clear()
             }) {
                 Icon(
-                    if (multiMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                    Icons.AutoMirrored.Filled.List,
                     contentDescription = "多选",
                     tint = if (multiMode) CandyPrimary else CandyTextDim,
                     modifier = Modifier.size(20.dp),
@@ -173,11 +181,11 @@ fun FileTreePanel(
                     selected = selectedDir == project,
                     onToggle = { rootExpanded = !rootExpanded },
                     onSelect = { selectedDir = it },
-                    onMenu = { node -> menuNode = node },
+                    onMenu = { node -> menuNode = TreeNodeMenu(node, 24, 60) },
                 )
                 if (rootExpanded) {
                     TreeNodes(tree, 0, vm, selectedDir, onFileClick,
-                        onNodeMenu = { node -> menuNode = node },
+                        onNodeMenu = { node, x, y -> menuNode = TreeNodeMenu(node, x, y) },
                         onSelectDir = { f -> selectedDir = f },
                         onZipClick = { f -> pendingZip = f },
                         multiMode = multiMode,
@@ -186,52 +194,61 @@ fun FileTreePanel(
                 }
             }
         }
-    }
-
-    // 只读工程（内置工程）：禁止增删改，只留打开与复制路径
-    val readOnly = project != null && ProjectStore.isBuiltin(project)
-    menuNode?.let { node ->
-        val items = if (readOnly) listOf(
-            "打开" to { onFileClick(node.file); menuNode = null; drawerClose() },
-            "复制路径" to { vm.copyPath(ctx, node.file); menuNode = null },
-        )
-        else if (node.isDir) listOf(
-            "创建子文件" to { newNameDialog = NewNodeRequest(node.file, false); menuNode = null },
-            "创建子目录" to { newNameDialog = NewNodeRequest(node.file, true); menuNode = null },
-            if (vm.clipFile.value != null) "粘贴文件" to { vm.pasteInto(node.file); menuNode = null } else null,
-            "重命名" to { renamingNode = node; menuNode = null },
-            "复制目录" to { vm.copyNode(node.file); menuNode = null },
-            "剪切目录" to { vm.cutNode(node.file); menuNode = null },
-            "删除目录" to { pendingDelete = node; menuNode = null },
-            "复制路径" to { vm.copyPath(ctx, node.file); menuNode = null },
-        ).filterNotNull()
-        else {
-            val isApk = node.name.endsWith(".apk", ignoreCase = true)
-            listOf(
-                if (isApk) "安装 APK" to { vm.installApk(node.file); menuNode = null; drawerClose() } else null,
-                "打开方式…" to { openWithNode = node; menuNode = null },
-                "重命名" to { renamingNode = node; menuNode = null },
-                "复制文件" to { vm.copyNode(node.file); menuNode = null },
-                "剪切文件" to { vm.cutNode(node.file); menuNode = null },
-                "删除文件" to { pendingDelete = node; menuNode = null },
-                "复制路径" to { vm.copyPath(ctx, node.file); menuNode = null },
+        // 长按文件/目录：快捷操作菜单（非对话框，定位到按压点；在 sheet 内悬浮）
+        menuNode?.let { mm ->
+            val items = if (readOnly) listOf(
+                "打开" to { onFileClick(mm.node.file); menuNode = null; drawerClose() },
+                "复制路径" to { vm.copyPath(ctx, mm.node.file); menuNode = null },
+            )
+            else if (mm.node.isDir) listOf(
+                "创建子文件" to { newNameDialog = NewNodeRequest(mm.node.file, false); menuNode = null },
+                "创建子目录" to { newNameDialog = NewNodeRequest(mm.node.file, true); menuNode = null },
+                if (vm.clipFile.value != null) "粘贴文件" to { vm.pasteInto(mm.node.file); menuNode = null } else null,
+                "重命名" to { renamingNode = mm.node; menuNode = null },
+                "复制目录" to { vm.copyNode(mm.node.file); menuNode = null },
+                "剪切目录" to { vm.cutNode(mm.node.file); menuNode = null },
+                "删除目录" to { pendingDelete = mm.node; menuNode = null },
+                "复制路径" to { vm.copyPath(ctx, mm.node.file); menuNode = null },
             ).filterNotNull()
-        }
-        AlertDialog(
-            onDismissRequest = { menuNode = null },
-            title = { Text(node.name) },
-            text = {
+            else {
+                val isApk = mm.node.name.endsWith(".apk", ignoreCase = true)
+                listOf(
+                    "打开" to { onFileClick(mm.node.file); menuNode = null; drawerClose() },
+                    "重命名" to { renamingNode = mm.node; menuNode = null },
+                    "复制文件" to { vm.copyNode(mm.node.file); menuNode = null },
+                    "剪切文件" to { vm.cutNode(mm.node.file); menuNode = null },
+                    "删除文件" to { pendingDelete = mm.node; menuNode = null },
+                    "复制路径" to { vm.copyPath(ctx, mm.node.file); menuNode = null },
+                    if (isApk) "安装 APK" to { vm.installApk(mm.node.file); menuNode = null } else null,
+                ).filterNotNull()
+            }
+            Surface(
+                modifier = Modifier
+                    .width(196.dp)
+                    .offset { androidx.compose.ui.unit.IntOffset(mm.x, mm.y) }
+                    .align(Alignment.TopStart),
+                shape = RoundedCornerShape(10.dp),
+                color = CandySurface,
+                shadowElevation = 8.dp,
+            ) {
                 Column {
                     items.forEach { (label, action) ->
-                        TextButton(onClick = action, modifier = Modifier.fillMaxWidth()) {
-                            Text(label, color = if (label.startsWith("删除")) Color(0xFFFF5C8A) else CandyText)
-                        }
+                        Text(
+                            label,
+                            color = if (label.startsWith("删除")) Color(0xFFFF5C8A) else CandyText,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { action() }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
                     }
                 }
-            },
-            confirmButton = {},
-        )
+            }
+        }
     }
+    }
+
 
     openWithNode?.let { node ->
         val isMd = node.name.endsWith(".md", ignoreCase = true)
@@ -409,7 +426,7 @@ private fun TreeNodes(
     vm: CandyViewModel,
     selectedDir: candy.ide.fs.CandyPath?,
     onFileClick: (candy.ide.fs.CandyPath) -> Unit,
-    onNodeMenu: (TreeNode) -> Unit,
+    onNodeMenu: (TreeNode, Int, Int) -> Unit,
     onSelectDir: (candy.ide.fs.CandyPath) -> Unit,
     onZipClick: (candy.ide.fs.CandyPath) -> Unit = {},
     multiMode: Boolean = false,
@@ -431,7 +448,7 @@ private fun TreeRow(
     vm: CandyViewModel,
     selectedDir: candy.ide.fs.CandyPath?,
     onFileClick: (candy.ide.fs.CandyPath) -> Unit,
-    onNodeMenu: (TreeNode) -> Unit,
+    onNodeMenu: (TreeNode, Int, Int) -> Unit,
     onSelectDir: (candy.ide.fs.CandyPath) -> Unit,
     onZipClick: (candy.ide.fs.CandyPath) -> Unit = {},
     multiMode: Boolean = false,
@@ -447,26 +464,28 @@ private fun TreeRow(
             .height(34.dp)
             .padding(start = indent.dp)
             .background(if (multiSelected) CandyPrimary.copy(alpha = 0.24f) else if (selected) CandySurfaceVariant else if (dirSelected) CandyPrimary.copy(alpha = 0.16f) else CandySurface)
-            .combinedClickable(
-                onClick = {
-                    if (multiMode && multiSet != null) {
-                        // 多选模式：点任意行即勾选/取消勾选
-                        if (multiSet.contains(node.file)) multiSet.remove(node.file) else multiSet.add(node.file)
-                    } else if (node.isDir) {
-                        node.expanded = !node.expanded
-                        onSelectDir(node.file)
-                    } else {
-                        val n = node.name.lowercase()
-                        when {
-                            n.endsWith(".apk") -> vm.installApk(node.file)
-                            // 点击 zip 类归档：弹确认框（在 FileTreePanel 持有状态）
-                            n.endsWith(".zip") || n.endsWith(".capr") -> onZipClick(node.file)
-                            else -> onFileClick(node.file)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        if (multiMode && multiSet != null) {
+                            // 多选模式：点任意行即勾选/取消勾选
+                            if (multiSet.contains(node.file)) multiSet.remove(node.file) else multiSet.add(node.file)
+                        } else if (node.isDir) {
+                            node.expanded = !node.expanded
+                            onSelectDir(node.file)
+                        } else {
+                            val n = node.name.lowercase()
+                            when {
+                                n.endsWith(".apk") -> vm.installApk(node.file)
+                                // 点击 zip 类归档：弹确认框（在 FileTreePanel 持有状态）
+                                n.endsWith(".zip") || n.endsWith(".capr") -> onZipClick(node.file)
+                                else -> onFileClick(node.file)
+                            }
                         }
-                    }
-                },
-                onLongClick = { onNodeMenu(node) }
-            ),
+                    },
+                    onLongPress = { offset -> onNodeMenu(node, offset.x.toInt(), offset.y.toInt()) },
+                )
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (node.isDir) {
@@ -503,7 +522,7 @@ private fun TreeRow(
             Icons.Default.Edit,
             contentDescription = "重命名",
             tint = CandyTextDim,
-            modifier = Modifier.size(15.dp).padding(end = 8.dp).clickable { onNodeMenu(node) }
+            modifier = Modifier.size(15.dp).padding(end = 8.dp).clickable { onNodeMenu(node, 200, 40) }
         )
     }
 }
@@ -515,3 +534,6 @@ private fun fileTint(name: String) = when (name.substringAfterLast('.', "").lowe
     "md" -> CandySecondary
     else -> CandyTextDim
 }
+/** 长按文件树节点：菜单 + 指针位置（快捷菜单风格，非对话框） */
+private data class TreeNodeMenu(val node: TreeNode, val x: Int, val y: Int)
+

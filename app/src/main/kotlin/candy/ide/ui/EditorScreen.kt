@@ -42,6 +42,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuBook
@@ -113,7 +115,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 
 private data class LongPressMenu(val x: Float, val y: Float, val line: Int, val col: Int, val preview: candy.ide.ui.ComposePreviewState? = null)
 
@@ -147,6 +148,12 @@ fun EditorScreen(vm: CandyViewModel) {
     var quickWord by remember { mutableStateOf<String?>(null) }
     // @composable 布局预览悬浮窗：长按 composable 函数弹出；编辑该函数 1s 无错自动刷新
     var composePreview by remember { mutableStateOf<candy.ide.ui.ComposePreviewState?>(null) }
+    // 预览布局加载对话框（LSP 首次分析慢，算完再弹悬浮窗）
+    var previewLoading by remember { mutableStateOf(false) }
+    // 3×3 编辑操作悬浮窗：羽毛笔按钮开关；editSel = 选择状态，editMode = '-'板/ '='板
+    var editOpsOpen by remember { mutableStateOf(false) }
+    var editMode by remember { mutableStateOf(false) }
+    var editSel by remember { mutableStateOf<candy.ide.editor.EditSel?>(null) }
     // 预览悬浮窗：顶栏拖动的位移（顶栏 onDrag 累加）
     var previewOffset by remember { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
     val previewScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -193,21 +200,48 @@ fun EditorScreen(vm: CandyViewModel) {
 
     // 诊断 -> 编辑器下划线：DiagItem 的行列换算成正文偏移，交给 sora 画红/黄波浪线。
     // 只有 Error/Warning 画波浪线；补充级（Hint/Info）只进悬浮窗与诊断页，不画线。
-    LaunchedEffect(vm.diagnostics.size, vm.diagnostics.firstOrNull()) {
+    LaunchedEffect(vm.diagnostics.size, vm.diagnostics.firstOrNull(), vm.diagFilter.value) {
         val ed = editor ?: return@LaunchedEffect
         val content = ed.text
         val lineCount = content.lineCount
         val container = DiagnosticsContainer()
+        val dfilter = vm.diagFilter.value
         vm.diagnostics.forEachIndexed { i, d ->
             if (d.line >= lineCount) return@forEachIndexed
             if (d.severity < DiagnosticRegion.SEVERITY_WARNING) return@forEachIndexed
+            if (!dfilter.accepts(d)) return@forEachIndexed   // 被屏蔽的等级不进编辑器诊断块
             runCatching {
                 val start = content.getCharIndex(d.line, d.char)
                 val end = content.getCharIndex(d.endLine, d.endChar)
                 if (end > start) container.addDiagnostic(DiagnosticRegion(start, end, d.severity, i.toLong()))
             }
+
         }
         ed.setDiagnostics(container)
+    }
+
+    // 快速修正（诊断卡长按 → vm.pendingQuickFix）：批量写回编辑器
+    LaunchedEffect(vm.pendingQuickFix.size) {
+        val fix = vm.pendingQuickFix.firstOrNull() ?: return@LaunchedEffect
+        val ed = editor ?: run { vm.pendingQuickFix.remove(fix); return@LaunchedEffect }
+        vm.pendingQuickFix.remove(fix)
+        runCatching {
+            val content = ed.text
+            var ok = false
+            try { ok = content.beginBatchEdit() } catch (_: Throwable) {}
+            try {
+                fix.edits.sortedByDescending { it.first.start.line * 100000 + it.first.start.character }
+                    .forEach { (range, text) ->
+                        runCatching {
+                            val s = content.getCharIndex(range.start.line, range.start.character)
+                            val e2 = content.getCharIndex(range.end.line, range.end.character)
+                            if (s in 0..e2) content.replace(s, e2, text)
+                        }
+                    }
+            } finally { if (ok) content.endBatchEdit() }
+            vm.onEditorTextChanged(content.toString())
+            vm.saveCurrent(content.toString())
+        }
     }
 
     // 文件树抽屉：不用 ModalNavigationDrawer（其遮罩点击不受理），自绘遮罩 + 面板，点遮罩即关
@@ -260,77 +294,25 @@ fun EditorScreen(vm: CandyViewModel) {
                             ) {
                                 Icon(Icons.Default.Save, contentDescription = "保存（长按保存全部工程文件）", tint = CandyText)
                             }
-                            // 撤销 / 恢复：短按撤销一步；长按弹出拖动条，向左拖撤销、向右拖恢复
-                            var undoBar by remember { mutableStateOf(false) }
+                            // 编辑操作悬浮窗开关（羽毛笔）：点一下开，再点一下关
                             Box(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .combinedClickable(
                                         enabled = isEditableFile && editor != null,
-                                        onClick = { editor?.undo() },
-                                        onLongClick = { undoBar = true },
+                                        onClick = {
+                                            editOpsOpen = !editOpsOpen
+                                            if (!editOpsOpen) editSel = null
+                                        },
                                     ),
                                 contentAlignment = androidx.compose.ui.Alignment.Center,
                             ) {
-                                Icon(Icons.Default.Undo, contentDescription = "撤销（长按拖动撤销/恢复）", tint = CandyText, modifier = Modifier.size(20.dp))
-                            }
-                            // 撤销/恢复拖动条：中点为基线，左侧拖动撤销、右侧拖动恢复
-                            if (undoBar) {
-                                var sliderPos by remember { mutableStateOf(0f) }
-                                var appliedPos by remember { mutableStateOf(0f) }
-                                Dialog(onDismissRequest = {
-                                    undoBar = false
-                                }) {
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = CandySurface,
-                                        modifier = Modifier.width(300.dp),
-                                    ) {
-                                        Column(modifier = Modifier.padding(16.dp)) {
-                                            Text(
-                                                "拖动撤销 / 恢复",
-                                                color = CandyText,
-                                                style = MaterialTheme.typography.titleSmall,
-                                            )
-                                            Spacer(Modifier.size(6.dp))
-                                            Text(
-                                                if (sliderPos < -0.05f) "撤销中…" else if (sliderPos > 0.05f) "恢复中…" else "松手关闭",
-                                                color = CandyTextDim,
-                                                fontSize = 12.sp,
-                                            )
-                                            Spacer(Modifier.size(10.dp))
-                                            Slider(
-                                                value = sliderPos,
-                                                onValueChange = { v ->
-                                                    val delta = v - appliedPos
-                                                    val ed = editor
-                                                    if (ed != null && delta < -0.02f) {
-                                                        val steps = (-delta * 12f).toInt().coerceAtLeast(1)
-                                                        repeat(steps) { ed.undo() }
-                                                    } else if (ed != null && delta > 0.02f) {
-                                                        val steps = (delta * 12f).toInt().coerceAtLeast(1)
-                                                        repeat(steps) { ed.redo() }
-                                                    }
-                                                    appliedPos = v
-                                                    sliderPos = v
-                                                },
-                                                onValueChangeFinished = {
-                                                    sliderPos = 0f
-                                                    appliedPos = 0f
-                                                },
-                                                valueRange = -1f..1f,
-                                            )
-                                            Spacer(Modifier.size(4.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-                                            ) {
-                                                Text("撤销", color = CandyTextDim, fontSize = 11.sp)
-                                                Text("恢复", color = CandyTextDim, fontSize = 11.sp)
-                                            }
-                                        }
-                                    }
-                                }
+                                Icon(
+                                    Icons.Default.Create,
+                                    contentDescription = "编辑操作（开关悬浮操作窗）",
+                                    tint = if (editOpsOpen) CandyPrimary else CandyText,
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                             Box(
                                 modifier = Modifier
@@ -380,51 +362,44 @@ fun EditorScreen(vm: CandyViewModel) {
                                     ),
                                     contentAlignment = androidx.compose.ui.Alignment.Center,
                                 ) {
-                                    Icon(Icons.Default.Settings, contentDescription = "其他操作（长按工程设置）", tint = CandyText)
+                                    Icon(Icons.Default.Build, contentDescription = "其他操作（长按工程设置）", tint = CandyText)
                                 }
                                 DropdownMenu(
                                     expanded = moreMenu,
                                     onDismissRequest = { moreMenu = false },
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("AI 助手") },
-                                        onClick = {
-                                            moreMenu = false
-                                            vm.goAgent()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("格式化文档") },
-                                        onClick = {
-                                            moreMenu = false
-                                            val ed = editor
-                                            if (ed == null) return@DropdownMenuItem
-                                            val ok = vm.formatDocument()
-                                            if (!ok) {
-                                                Toast.makeText(ctx, "文档已是格式化状态，无需调整", Toast.LENGTH_SHORT).show()
-                                                return@DropdownMenuItem
-                                            }
-                                            // 应用 pendingFormatEdits：批量编辑合并成一次撤销
-                                            val content = ed.text
-                                            val edits = vm.pendingFormatEdits.toList()
-                                            vm.pendingFormatEdits.clear()
-                                            var ok2 = false
-                                            try { ok2 = content.beginBatchEdit() } catch (_: Throwable) { ok2 = false }
-                                            try {
-                                                edits
-                                                    .sortedByDescending { it.first.start.line * 100000 + it.first.start.character }
-                                                    .forEach { (range, text) ->
-                                                        runCatching {
-                                                            val s = content.getCharIndex(range.start.line, range.start.character)
-                                                            val e = content.getCharIndex(range.end.line, range.end.character)
-                                                            if (s in 0..e) content.replace(s, e, text)
-                                                        }
+                                    MoreMenuRow("AI 助手") {
+                                        moreMenu = false
+                                        vm.goAgent()
+                                    }
+                                    MoreMenuRow("格式化文档") {
+                                        moreMenu = false
+                                        val ed = editor
+                                        if (ed == null) return@MoreMenuRow
+                                        val ok = vm.formatDocument()
+                                        if (!ok) {
+                                            Toast.makeText(ctx, "文档已是格式化状态，无需调整", Toast.LENGTH_SHORT)
+                                            return@MoreMenuRow
+                                        }
+                                        // 应用 pendingFormatEdits：批量编辑合并成一次撤销
+                                        val content = ed.text
+                                        val edits = vm.pendingFormatEdits.toList()
+                                        vm.pendingFormatEdits.clear()
+                                        var ok2 = false
+                                        try { ok2 = content.beginBatchEdit() } catch (_: Throwable) {}
+                                        try {
+                                            edits
+                                                .sortedByDescending { it.first.start.line * 100000 + it.first.start.character }
+                                                .forEach { (range, text) ->
+                                                    runCatching {
+                                                        val s = content.getCharIndex(range.start.line, range.start.character)
+                                                        val e = content.getCharIndex(range.end.line, range.end.character)
+                                                        if (s in 0..e) content.replace(s, e, text)
                                                     }
-                                            } finally { if (ok2) content.endBatchEdit() }
-                                            vm.onEditorTextChanged(content.toString())
-                                            vm.saveCurrent(content.toString())
-                                        },
-                                    )
+                                                }
+                                        } finally { if (ok2) content.endBatchEdit() }
+                                        vm.onEditorTextChanged(content.toString())
+                                    }
                                 }
                             }
                         },
@@ -512,18 +487,8 @@ fun EditorScreen(vm: CandyViewModel) {
                                 readOnly = isMdProject,
                                 onEditorReady = { editor = it },
                                 onLongPress = { x, y, line, col ->
-                                    // 菜单先弹（不阻塞）；命中 @composable 函数时后台算视图树，
-                                    // 算好把「预览布局」选项填进菜单（首次分析慢，不在主线程等）
+                                    // 菜单直接弹（不预计算）：「预览布局」常驻，点击时弹加载框后台算
                                     longMenu = LongPressMenu(x, y, line, col, null)
-                                    previewScope.launch {
-                                        val pv = withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                            runCatching { vm.composePreviewState(line, col) }.getOrNull()
-                                        }
-                                        val cur = longMenu
-                                        if (cur != null && cur.line == line && cur.col == col) {
-                                            longMenu = cur.copy(preview = pv)
-                                        }
-                                    }
                                 },
                                 completionLongClick = { label, kind ->
                                     val ed = editor ?: return@SoraEditorView
@@ -585,7 +550,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                     quickMenu = LongPressMenu(x, y, line, col)
                                     quickWord = w
                                 },
-                                onEditorClick = { longMenu = null; quickMenu = null },
+                                onEditorClick = { longMenu = null; quickMenu = null; editSel = null },
                                 onCursorChange = { line, col ->
                                     cursorLine = line
                                     cursorCol = col
@@ -615,12 +580,12 @@ fun EditorScreen(vm: CandyViewModel) {
                                 runCatching { vm.computeSignatureHelp(ln, c) }.getOrNull()
                             }
                         }
-                        // 布局预览刷新：编辑（textEditTick 变化）后 1s 防抖；
+                        // 布局预览刷新：编辑（textEditTick 变化）后 0.3s 防抖；
                         // 函数声明行范围内无 Error 诊断才刷新（用户规则：修改没错才更新）
                         LaunchedEffect(textEditTick, composePreview?.fnName) {
                             val pv = composePreview ?: return@LaunchedEffect
                             if (textEditTick == 0) return@LaunchedEffect
-                            kotlinx.coroutines.delay(1000)
+                            kotlinx.coroutines.delay(300)
                             val hasErr = vm.diagnostics.any { d ->
                                 d.severity >= DiagnosticRegion.SEVERITY_ERROR &&
                                     d.line in pv.start..pv.end
@@ -648,6 +613,7 @@ fun EditorScreen(vm: CandyViewModel) {
                                 candy.ide.ui.ComposePreviewPanel(
                                     state = pv,
                                     fullscreen = false,
+                                    editEnabled = false,   // 悬浮窗只读：编辑请进全屏页
                                     onToggleFullscreen = { vm.openComposePreviewFull(pv) },   // 像 AI 助手那样单开一页全屏
                                     onClose = { composePreview = null; previewOffset = androidx.compose.ui.unit.IntOffset.Zero },
                                     onApply = { _ ->
@@ -697,6 +663,37 @@ fun EditorScreen(vm: CandyViewModel) {
                         }
 
 
+                        // 编辑操作悬浮窗（3×3）：浮在编辑区右下角，点遮罩/羽毛笔不关，只由羽毛笔开关
+                        if (editOpsOpen) {
+                            candy.ide.editor.EditOpsWindow(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(end = 12.dp, bottom = 12.dp),
+                                selecting = editSel != null,
+                                sideLeft = editSel?.sideLeft == true,
+                                mode = editMode,
+                                onOp = { op ->
+                                    editor?.let { ed ->
+                                        runCatching {
+                                            when (op) {
+                                                candy.ide.editor.EditOp.MODE -> editMode = !editMode
+                                                candy.ide.editor.EditOp.UNDO -> ed.undo()
+                                                candy.ide.editor.EditOp.REDO -> ed.redo()
+                                                else -> {
+                                                    val res = candy.ide.editor.applyEditOp(ed, op, editSel)
+                                                    editSel = res.sel
+                                                    val pp = res.popup
+                                                    if (pp != null) {
+                                                        quickMenu = LongPressMenu(pp.x, pp.y, pp.line, pp.col)
+                                                        quickWord = null
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                        }
                         // 双击快捷操作菜单：词级上下文（函数调用 → 指名调用；标识符 → 转定义/重命名）
                         quickMenu?.let { menu ->
                             val ed3 = editor
@@ -756,11 +753,17 @@ fun EditorScreen(vm: CandyViewModel) {
                             ) {
                                 Column {
                                     val ed = editor
-                                    // 命中 @composable 函数：菜单首项「预览布局」弹悬浮窗
-                                    if (menu.preview != null) {
-                                        LongMenuRow("▶ 预览布局") {
-                                            longMenu = null
-                                            composePreview = menu.preview
+                                    // 「预览布局」常驻（不在 @composable 内时给提示）；点击弹加载框
+                                    LongMenuRow("▶ 预览布局") {
+                                        longMenu = null
+                                        previewLoading = true
+                                        previewScope.launch {
+                                            val pv = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                                runCatching { vm.composePreviewState(menu.line, menu.col) }.getOrNull()
+                                            }
+                                            previewLoading = false
+                                            if (pv != null) composePreview = pv
+                                            else Toast.makeText(ctx, "此处不在 @composable 函数内", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                     if (word != null) {
@@ -792,6 +795,22 @@ fun EditorScreen(vm: CandyViewModel) {
                                     }
                                 }
                             }
+                        }
+
+                        // 预览布局加载对话框
+                        if (previewLoading) {
+                            AlertDialog(
+                                onDismissRequest = {},
+                                title = { Text("分析布局中") },
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        Spacer(Modifier.size(10.dp))
+                                        Text("正在解析 @composable 函数的视图树…", fontSize = 13.sp)
+                                    }
+                                },
+                                confirmButton = {},
+                            )
                         }
 
                         // 光标处诊断悬浮窗：光标停在诊断区间内时出现，点条目弹快速修正
@@ -869,20 +888,45 @@ fun EditorScreen(vm: CandyViewModel) {
                         }
                     }
                 
-                    // 底部符号栏：常规 + Unicode 两行；imePadding 让它始终浮在输入法上方
+                    // 底部符号栏；imePadding 让它始终浮在输入法上方
                     if (isEditableFile && currentFile != null) {
-                        candy.ide.editor.SymbolBars(
-                            modifier = Modifier.imePadding(),
-                            onSymbol = { sym ->
-                                editor?.let { ed ->
-                                    runCatching {
-                                        val cursor = ed.cursor
-                                        ed.insertText(sym, 1)
-                                        ed.setSelection(cursor.leftLine, cursor.leftColumn + sym.length, true)
-                                    }
-                                }
-                            },
-                        )
+                        Column(modifier = Modifier.imePadding().fillMaxWidth()) {
+                            // 符号栏：选中文本时 ( { [ < 包裹选区，其余直接插入
+                            if (candy.ide.data.Settings.assistSymbolBar) {
+                                candy.ide.editor.SymbolBars(
+                                    full = candy.ide.data.Settings.symbolBarFull,
+                                    onSymbol = { sym ->
+                                        editor?.let { ed ->
+                                            runCatching {
+                                                val c = ed.cursor
+                                                val wrap = c.left != c.right && sym in listOf("(", "{", "[", "<")
+                                                if (wrap) {
+                                                    // 用括号包裹选区：删选区 → 插入 开括号+原文+闭括号，再选中内部
+                                                    val selTxt = ed.text.substring(c.left, c.right)
+                                                    val close = when (sym) {
+                                                        "(" -> ")"; "{" -> "}"; "[" -> "]"; else -> ">"
+                                                    }
+                                                    val a = ed.text.getIndexer().getCharPosition(c.left)
+                                                    val b = ed.text.getIndexer().getCharPosition(c.right)
+                                                    ed.text.beginBatchEdit()
+                                                    ed.text.delete(a.line, a.column, b.line, b.column)
+                                                    ed.text.insert(a.line, a.column, sym + selTxt + close)
+                                                    ed.text.endBatchEdit()
+                                                    val st = c.left + 1
+                                                    val p1 = ed.text.getIndexer().getCharPosition(st)
+                                                    val p2 = ed.text.getIndexer().getCharPosition(st + selTxt.length)
+                                                    ed.setSelectionRegion(p1.line, p1.column, p2.line, p2.column)
+                                                    editSel = candy.ide.editor.EditSel(st)
+                                                } else {
+                                                    ed.insertText(sym, 1)
+                                                    ed.setSelection(c.leftLine, c.leftColumn + sym.length, true)
+                                                }
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
 }
             }
@@ -1238,6 +1282,20 @@ fun EditorScreen(vm: CandyViewModel) {
     }
 }
 
+/** 其他功能菜单条目：与快捷操作菜单同一视觉风格 */
+@Composable
+private fun MoreMenuRow(text: String, onClick: () -> Unit) {
+    Text(
+        text,
+        color = CandyText,
+        fontSize = 14.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
 @Composable
 private fun LongMenuRow(text: String, onClick: () -> Unit) {
     Text(
@@ -1247,7 +1305,7 @@ private fun LongMenuRow(text: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
 
@@ -1532,3 +1590,7 @@ private fun wordAtCursorOf(editor: io.github.rosemoe.sora.widget.CodeEditor, lin
         row.substring(l, r)
     }.getOrDefault("")
 }
+
+
+
+

@@ -112,7 +112,9 @@ object AndroidApkBuilder {
         // ---- manifest / 资源改写 ----
         // 包名：模板包名字符串池替换 + arsc 包名 patch；标签同理Strings 池里的 "Sublimation"。
         // 版本：versionCode(0x0101021b) / versionName(0x0101021c) 是框架 attr，走 intEdits/stringEdits。
-        val pkg = "functor.sublimation." + (config.pkgSeed.ifBlank { asciiSeed(project) })
+        // pkgSeed 非法（中文/空格）时也清洗，避免清单包名带非 ASCII
+        val pkg = "functor.sublimation." +
+            if (config.pkgSeed.isNotBlank()) asciiSeedStr(config.pkgSeed) else asciiSeed(project)
         val manifestEdits = HashMap<String, String>()
         if (pkg != TEMPLATE_PKG) {
             manifestEdits[TEMPLATE_PKG] = pkg
@@ -176,7 +178,17 @@ object AndroidApkBuilder {
         return apk
     }
 
-    /** 工程目录名转 ASCII 种子：非字母数字字符去掉 */
-    private fun asciiSeed(project: candy.ide.fs.CandyPath): String =
-        project.name.toCharArray().filter { it.isLetterOrDigit() }.joinToString("").lowercase().ifBlank { "app" }
+    /** 工程目录名转 ASCII 包名种子：只留 [a-z0-9_]（汉字也是 isLetter，绝不能放进包名，
+     *  否则 pm install 报 INSTALL_PARSE_FAILED_BAD_PACKAGE_NAME：Invalid manifest package），
+     *  空串或数字开头补 app 前缀 */
+    private fun asciiSeed(project: candy.ide.fs.CandyPath): String {
+        val clean = project.name.lowercase().filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }
+        return if (clean.isEmpty() || clean.first().isDigit()) "app" + clean else clean
+    }
+
+    /** app.json 手填的 pkgSeed 也要走同一清洗（用户可能写中文/空格/点） */
+    private fun asciiSeedStr(s: String): String {
+        val clean = s.lowercase().filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }
+        return if (clean.isEmpty() || clean.first().isDigit()) "app" + clean else clean
+    }
 }

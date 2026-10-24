@@ -23,6 +23,10 @@ object Settings {
     var fontId by mutableStateOf("jetbrains")   // 编辑器字体：jetbrains=内置 / system=系统 / 其它=导入的字体名
     var silentInstall by mutableStateOf(false)   // JS-apk 打包完直接静默安装（跳过「是否安装」对话框）
 
+    // —— 辅助功能（编辑器符号栏；操作窗由顶栏羽毛笔按钮开关）——
+    var assistSymbolBar by mutableStateOf(true)   // 符号栏：ASCII + Unicode 两列
+    var symbolBarFull by mutableStateOf(false)   // 完全显示符号栏：换行展开 + A/U 切换
+
     // —— AI agent 配置（OpenAI 兼容端点；ADK 里由 OpenAiModel 消费）——
     var agentEnabled by mutableStateOf(false)   // 悬浮球总开关；关掉不显
     var agentScope by mutableStateOf("project")   // agent 访问权：readonly/project/workspace/full
@@ -57,6 +61,8 @@ var gitInitDeferred by mutableStateOf(false)  // git 初始化引导：点过一
                 wordWrap = props.getProperty("wordWrap") == "true"
                 props.getProperty("font")?.let { if (it.isNotBlank()) fontId = it }
                 silentInstall = props.getProperty("silentInstall") == "true"
+                assistSymbolBar = props.getProperty("assistSymbolBar") != "false"
+                symbolBarFull = props.getProperty("symbolBarFull") == "true"
                 props.getProperty("agentBaseUrl")?.let { if (it.isNotBlank()) agentBaseUrl = it }
                 props.getProperty("agentModel")?.let { if (it.isNotBlank()) agentModel = it }
                 props.getProperty("agentKey")?.let { if (it.isNotBlank()) agentKey = it }
@@ -87,6 +93,8 @@ var gitInitDeferred by mutableStateOf(false)  // git 初始化引导：点过一
                 setProperty("wordWrap", wordWrap.toString())
                 setProperty("font", fontId)
                 setProperty("silentInstall", silentInstall.toString())
+                setProperty("assistSymbolBar", assistSymbolBar.toString())
+                setProperty("symbolBarFull", symbolBarFull.toString())
                 setProperty("agentBaseUrl", agentBaseUrl)
                 setProperty("agentModel", agentModel)
                 setProperty("agentKey", agentKey)

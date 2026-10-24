@@ -11,83 +11,83 @@
 @theorem
 fun `refl`[a]: Null <a = a>
 @theorem
-fun `sym`[a, b]: Null <(a = b) -> (b = a)>
+fun `sym`[a, b]: Null <(a = b) → (b = a)>
 @theorem
-fun `trans`[a, b, c]: Null <(a = b) & (b = c) -> (a = c)>
+fun `trans`[a, b, c]: Null <(a = b) & (b = c) → (a = c)>
 // 依据：Leibniz 同一性替换原理。命题参数 P 的实例化头部须与目标谓词同名才能命中。
 @theorem
-fun `leibniz`[T, @P, a, b]: Null <(a = b) -> P<b>>
+fun `leibniz`[T, @P, a, b]: Null <(a = b) → P<b>>
 
 // ---------- 蕴含 ----------
-// 依据：分离规则（MP）；Γ 里 p 与 p-> q 经饱和闭包自动产 q，本定理供 ∴ 同形目标直接命中。
+// 依据：分离规则（MP）；Γ 里 p 与 p→ q 经饱和闭包自动产 q，本定理供 ∴ 同形目标直接命中。
 @theorem
-fun `modus ponens`[p, q]: Null <(p & (p -> q)) -> q>
-// 依据：蕴含的同一性（p -> p 直觉可证）。
+fun `modus ponens`[p, q]: Null <(p & (p → q)) → q>
+// 依据：蕴含的同一性（p → p 直觉可证）。
 @theorem
-fun `imp refl`[p]: Null <p -> p>
+fun `imp refl`[p]: Null <p → p>
 
 // ---------- 合取 ----------
 @theorem
-fun `and intro`[p, q]: Null <p -> (q -> (p & q))>
+fun `and intro`[p, q]: Null <p → (q → (p & q))>
 @theorem
-fun `and elim left`[p, q]: Null <(p & q) -> p>
+fun `and elim left`[p, q]: Null <(p & q) → p>
 @theorem
-fun `and elim right`[p, q]: Null <(p & q) -> q>
+fun `and elim right`[p, q]: Null <(p & q) → q>
 @theorem
-fun `and comm`[p, q]: Null <(p & q) -> (q & p)>
+fun `and comm`[p, q]: Null <(p & q) → (q & p)>
 @theorem
-fun `and assoc`[p, q, r]: Null <(p & (q & r)) -> ((p & q) & r)>
+fun `and assoc`[p, q, r]: Null <(p & (q & r)) → ((p & q) & r)>
 // 依据：命题逻辑可证（Γ 饱和的合取分解/合取引入即覆盖）。
 @theorem
-fun `and idem`[p]: Null <p -> (p & p)>
+fun `and idem`[p]: Null <p → (p & p)>
 
 // ---------- 析取 ----------
 @theorem
-fun `or intro left`[p, q]: Null <p -> (p ∨ q)>
+fun `or intro left`[p, q]: Null <p → (p ∨ q)>
 @theorem
-fun `or intro right`[p, q]: Null <q -> (p ∨ q)>
+fun `or intro right`[p, q]: Null <q → (p ∨ q)>
 // 依据：析取消去（按例推理）。
 @theorem
-fun `or elim`[p, q, r]: Null <((p ∨ q) & (p -> r) & (q -> r)) -> r>
+fun `or elim`[p, q, r]: Null <((p ∨ q) & (p → r) & (q → r)) → r>
 @theorem
-fun `or comm`[p, q]: Null <(p ∨ q) -> (q ∨ p)>
+fun `or comm`[p, q]: Null <(p ∨ q) → (q ∨ p)>
 @theorem
-fun `or assoc`[p, q, r]: Null <(p ∨ (q ∨ r)) -> ((p ∨ q) ∨ r)>
+fun `or assoc`[p, q, r]: Null <(p ∨ (q ∨ r)) → ((p ∨ q) ∨ r)>
 // 依据：析取幂等（直觉可证）。
 @theorem
-fun `or idem`[p]: Null <p -> (p ∨ p)>
+fun `or idem`[p]: Null <p → (p ∨ p)>
 
 // ---------- 否定 ----------
 // 依据：双否引入（直觉主义成立；消去需经典逻辑，见 classic.subl）。
 @theorem
-fun `double neg intro`[p]: Null <p -> ¬¬p>
+fun `double neg intro`[p]: Null <p → ¬¬p>
 // 依据：爆炸原理（ex falso quodlibet）。
 @theorem
-fun `contradiction`[p, q]: Null <(p & ¬p) -> q>
+fun `contradiction`[p, q]: Null <(p & ¬p) → q>
 // 依据：逆否命题的构造（modus tollens；Γ 饱和已内置 MT，本定理供 ∴ 同形目标命中）。
 @theorem
-fun `not implies`[p, q]: Null <((p -> q) & ¬q) -> ¬p>
+fun `not implies`[p, q]: Null <((p → q) & ¬q) → ¬p>
 
 // ---------- 量词 ----------
 // 依据：全称实例化。P 为命题元变量；证明器对 ∀ 目标走概括规则（新鲜常量），本定理供同形目标命中。
 @theorem
-fun `forall elim`[T, @P, a]: Null <(∀x. P<x>) -> P<a>>
+fun `forall elim`[T, @P, a]: Null <(∀x. P<x>) → P<a>>
 // 依据：存在引入（给出见证）。
 @theorem
-fun `exists intro`[T, @P, a]: Null <P<a> -> (∃x. P<x>)>
+fun `exists intro`[T, @P, a]: Null <P<a> → (∃x. P<x>)>
 // 依据：存在消去（见证任意化）。
 @theorem
-fun `exists elim`[T, @P, q]: Null <((∃x. P<x>) & (∀x. (P<x> -> q))) -> q>
+fun `exists elim`[T, @P, q]: Null <((∃x. P<x>) & (∀x. (P<x> → q))) → q>
 
 // ---------- 区间与序（基础） ----------
 // 依据：区间 (l..r) 的语义即 l ≤ n ≤ r（命题形态的 .. 由编译器归一）。
 @theorem
-fun `range lower bound`[x, l, r]: Null <(x ∈ (l..r)) -> (x >= l)>
+fun `range lower bound`[x, l, r]: Null <(x ∈ (l..r)) → (x >= l)>
 @theorem
-fun `range upper bound`[x, l, r]: Null <(x ∈ (l..r)) -> (x <= r)>
+fun `range upper bound`[x, l, r]: Null <(x ∈ (l..r)) → (x <= r)>
 // 依据：区间再划分：x ∈ (l..r) 且 x ≤ m ⇒ x ∈ (l..m)。
 @theorem
-fun `range split right`[x, l, m, r]: Null <((x ∈ (l..r)) & (x <= m)) -> (x ∈ (l..m))>
+fun `range split right`[x, l, m, r]: Null <((x ∈ (l..r)) & (x <= m)) → (x ∈ (l..m))>
 
 // ---------- 序（通用） ----------
 // 依据：≤ 自反律（对任意序关系成立）。
@@ -95,30 +95,30 @@ fun `range split right`[x, l, m, r]: Null <((x ∈ (l..r)) & (x <= m)) -> (x ∈
 fun `leq refl`[a]: Null <a <= a>
 // 依据：≤ 传递律。
 @theorem
-fun `leq trans`[a, b, c]: Null <(a <= b) & (b <= c) -> (a <= c)>
+fun `leq trans`[a, b, c]: Null <(a <= b) & (b <= c) → (a <= c)>
 
 // ---------- 自然数（渗透定律） ----------
 // 依据：nat nonneg 定理在 stdlib.nat（Nat 的自然归宿）；本节不再重复声明——v1 旧名 natNonNeg 见下方兼容区。
 
 // ---------- 旧名兼容（v1 保留；形式与上方文档命名定理等价，定理搜索按后件合一，二者皆可命中） ----------
 @theorem
-fun rangeLowerBound[x, l, r]: Null <x ∈ (l..r) -> x >= l>
+fun rangeLowerBound[x, l, r]: Null <x ∈ (l..r) → x >= l>
 @theorem
-fun rangeUpperBound[x, l, r]: Null <x ∈ (l..r) -> x <= r>
+fun rangeUpperBound[x, l, r]: Null <x ∈ (l..r) → x <= r>
 @theorem
 fun leqRefl[a]: Null <a <= a>
 @theorem
-fun leqTrans[a, b, c]: Null <a <= b & b <= c -> a <= c>
+fun leqTrans[a, b, c]: Null <a <= b & b <= c → a <= c>
 @theorem
-fun andLeft[p, q]: Null <p & q -> p>
+fun andLeft[p, q]: Null <p & q → p>
 @theorem
-fun andRight[p, q]: Null <p & q -> q>
+fun andRight[p, q]: Null <p & q → q>
 @theorem
-fun andIntro[p, q]: Null <p -> (q -> (p & q))>
+fun andIntro[p, q]: Null <p → (q → (p & q))>
 @theorem
-fun modusPonens[p, q]: Null <p & (p -> q) -> q>
+fun modusPonens[p, q]: Null <p & (p → q) → q>
 @theorem
-fun rangeSplitRight[x, l, m, r]: Null <x ∈ (l..r) & x <= m -> x ∈ (l..m)>
+fun rangeSplitRight[x, l, m, r]: Null <x ∈ (l..r) & x <= m → x ∈ (l..m)>
 @theorem
 fun natNonNeg[n]: Null <n >= 0>
 

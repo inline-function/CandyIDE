@@ -235,6 +235,40 @@ fun SettingsScreen(vm: CandyViewModel) {
                     Switch(checked = Settings.wordWrap, onCheckedChange = { vm.setWordWrap(it) })
                 }
             }
+            // ───────── 辅助功能：符号栏开关 ─────────
+            item { SectionTitle("辅助功能") }
+            item {
+                Surface(color = CandySurface) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("开启符号栏", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("编辑器底部同时显示 ASCII 与 Unicode 两列符号，点击插入", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = Settings.assistSymbolBar, onCheckedChange = {
+                            Settings.assistSymbolBar = it; Settings.persist(ctx)
+                        })
+                    }
+                }
+            }
+            item {
+                Surface(color = CandySurface) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("完全显示符号栏", color = CandyText)
+                            Spacer(Modifier.size(2.dp))
+                            Text("符号过多时自动展开为多行而无需滑动；首项 A / U 点击切换当前符号集", color = CandyTextDim, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = Settings.symbolBarFull, onCheckedChange = {
+                            Settings.symbolBarFull = it; Settings.persist(ctx)
+                        })
+                    }
+                }
+            }
             item { SectionTitle("Shizuku 权限") }
             item {
                 Surface(color = CandySurface) {

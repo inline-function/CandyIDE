@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,7 +66,7 @@ data class ComposePreviewState(
     val treeJson: String,
 )
 
-private fun JSONObject.deepCopy(): JSONObject = JSONObject(this.toString())
+internal fun JSONObject.deepCopy(): JSONObject = JSONObject(this.toString())
 
 /** 按路径取节点（root 自身的路径是空表） */
 internal fun nodeAt(root: JSONObject, path: List<Int>): JSONObject? {
@@ -116,6 +117,8 @@ internal fun mkText(t: String): JSONObject = JSONObject().apply {
 fun ComposePreviewPanel(
     state: ComposePreviewState,
     fullscreen: Boolean,
+    /** 是否允许编辑视图树/属性：悬浮窗只读，独立全屏页可编辑 */
+    editEnabled: Boolean = false,
     onToggleFullscreen: () -> Unit,
     onClose: () -> Unit,
     onApply: (String) -> Unit,
@@ -204,15 +207,6 @@ fun ComposePreviewPanel(
                     .padding(horizontal = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TinyTopBtn(if (showTree) "树▸" else "树", active = showTree) { showTree = !showTree }
-                TinyTopBtn(if (showProps) "属性▸" else "属性", active = showProps && selPath != null) {
-                    // 没选中视图时默认选第一个顶层视图，属性面板立即可用
-                    if (selPath == null) {
-                        val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
-                        if (kids != null && kids.length() > 0) selPath = listOf(0)
-                    }
-                    showProps = !showProps
-                }
                 Text(
                     text = "@" + state.fnName,
                     color = candy.ide.ui.theme.CandyTextDim,
@@ -221,25 +215,14 @@ fun ComposePreviewPanel(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (dirty) {
-                    Text(
-                        text = "未应用",
-                        color = candy.ide.ui.theme.CandyError,
-                        fontSize = 8.sp,
-                        modifier = Modifier.padding(end = 2.dp),
-                    )
-                }
-                TinyTopBtn("应用", active = dirty) {
-                    onApply(tree.toString())
-                    dirty = false
-                }
-                TinyTopBtn("全屏", true) { onToggleFullscreen() }
+                // 悬浮窗只读：点全屏图标进独立页才可编辑树/属性
+                TinyIconBtn(Icons.Default.Fullscreen, contentDescription = "全屏编辑") { onToggleFullscreen() }
                 TinyTopBtn("✕", true) { onClose() }
             }
         }
         Row(modifier = Modifier.fillMaxSize()) {
-            // 左侧滑栏：视图树大纲 + 节点操作
-            if (showTree) {
+            // 左侧滑栏：视图树大纲 + 节点操作（悬浮窗只读 → 不显示树）
+            if (showTree && editEnabled) {
                 Column(
                     modifier = Modifier
                         .width(if (fullscreen) 170.dp else 110.dp)
@@ -249,7 +232,7 @@ fun ComposePreviewPanel(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     val sel = selPath?.let { nodeAt(tree, it) }
-                    if (sel != null) TreeOpsBar(
+                    if (sel != null && editEnabled) TreeOpsBar(
                         canPaste = clipboard != null,
                         onDelete = { selPath?.let { p -> if (p.isNotEmpty()) { val par = nodeAt(tree, p.dropLast(1))!!; removeChild(par, p.last()); mutate() } } },
                         onCopy = { clipboard = sel.deepCopy() },
@@ -263,7 +246,12 @@ fun ComposePreviewPanel(
                     val kids = runCatching { tree.getJSONArray("children") }.getOrNull()
                     if (kids != null) {
                         for (i in 0 until kids.length()) {
-                            TreeRow(kids.getJSONObject(i), emptyList(), selPath, 0) { p -> selPath = p; showProps = true }
+                            TreeRow(
+                        kids.getJSONObject(i), emptyList(), selPath, 0,
+                    ) { p ->
+                        selPath = p
+                        if (editEnabled) showProps = true
+                    }
                         }
                     }
                 }
@@ -282,7 +270,7 @@ fun ComposePreviewPanel(
                 }
             }
             // 右侧滑栏：选中视图的属性
-            if (showProps && selPath != null) {
+            if (showProps && selPath != null && editEnabled) {
                 val node = nodeAt(tree, selPath!!)
                 if (node != null) PropPanel(
                     node = node,
@@ -318,6 +306,23 @@ private fun TinyTopBtn(label: String, enabled: Boolean = true, active: Boolean =
             fontSize = 9.sp,
             fontWeight = if (active) FontWeight.Bold else null,
             maxLines = 1,
+        )
+    }
+}
+
+/** 顶栏图标按钮（与 AI 助手悬浮球的全屏图标同款风格） */
+@Composable
+private fun TinyIconBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean = true, active: Boolean = false, contentDescription: String, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(24.dp)) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = when {
+                active -> candy.ide.ui.theme.CandySecondary
+                !enabled -> candy.ide.ui.theme.CandyTextDim
+                else -> candy.ide.ui.theme.CandyPrimary
+            },
+            modifier = Modifier.size(14.dp),
         )
     }
 }
@@ -383,7 +388,7 @@ internal fun TreeOpsBar(
 }
 
 @Composable
-private fun TinyOpBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun TinyOpBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(20.dp)) {
         Text(label, color = if (enabled) candy.ide.ui.theme.CandySecondary else candy.ide.ui.theme.CandyTextDim, fontSize = 8.sp)
     }
@@ -431,6 +436,22 @@ internal fun PropPanel(
             onAddProp("orientation", "\"" + v + "\"")
         }
         PropTextRow("kind", props.optString("kind").trim('\"')) { v -> onAddProp("kind", "\"" + v + "\"") }
+        // 节点自带的其他属性：任何视图都应能编辑自身全部属性
+        val extras = remember(props) {
+            val shown = setOf("text", "placeholder", "size", "color", "bold", "orientation", "kind", "modifier")
+            val out = ArrayList<Pair<String, String>>()
+            val ks = props.keys()
+            while (ks.hasNext()) {
+                val k = ks.next()
+                if (k !in shown) out.add(k to (runCatching { props[k] }.getOrNull()?.toString() ?: ""))
+            }
+            out.sortedBy { it.first }
+        }
+        extras.forEach { (k, raw) ->
+            PropTextRow(k, raw.trim('"')) { v ->
+                onAddProp(k, if (v.matches(Regex("-?\\d+(\\.\\d+)?"))) v else "\"" + v + "\"")
+            }
+        }
         Spacer(Modifier.height(6.dp))
         TinyOpBtn("清空属性", true) {
             for (k in PROP_EDIT_KEYS) onRemoveProp(k)

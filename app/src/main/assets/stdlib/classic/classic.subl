@@ -4,9 +4,9 @@
 @classic
 @theorem
 fun tertiumNonDatur[p]: Null <p ∨ ¬p>
-// 双否消去：经典逻辑特有（直觉主义只有 ¬¬p -> p 的逆方向）。
+// 双否消去：经典逻辑特有（直觉主义只有 ¬¬p → p 的逆方向）。
 @theorem
-fun doubleNegation[p]: Null <¬¬p -> p>
+fun doubleNegation[p]: Null <¬¬p → p>
 // 逆否命题：蕴含的镜像。
 @theorem
-fun contraposition[p, q]: Null <(p -> q) -> (¬q -> ¬p)>
+fun contraposition[p, q]: Null <(p → q) → (¬q → ¬p)>
