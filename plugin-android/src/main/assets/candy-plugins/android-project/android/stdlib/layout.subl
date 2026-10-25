@@ -1,0 +1,6 @@
+// android/layout.subl —— 布局（android doc/安卓标准库.md §布局）
+//
+// layout 接收一个返回视图结构体的 lambda：KT 端收到 JS 传来的视图树后，
+// 动态构建原生 MD 视图并设为当前活动的布局。
+
+@android @impure fun layout(content: (Any) => Any): Null

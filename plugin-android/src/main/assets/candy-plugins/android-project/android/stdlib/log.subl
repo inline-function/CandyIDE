@@ -1,0 +1,5 @@
+// android/log.subl —— 日志（android doc/安卓标准库.md §log函数）
+// log 把内容输出到应用日志（可经 adb / shizuku 被外部应用读取，用于调试）。
+// 参数：msg（Str 日志内容）、level（Int 输出等级；0=Verbose 1=Debug 2=Info 3=Warn 4=Error，默认 2=Info）。
+
+@android @impure fun log(msg: Str, level: Int = 2): Null

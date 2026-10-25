@@ -1,0 +1,13 @@
+// android/Modifier.subl —— 修饰符（android doc/安卓标准库.md §布局）
+//
+// Modifier 是视图结构体的通用属性载体：尺寸、间距、对齐等布局意图。
+// 类型安全（enum 构造子）：非法修饰符字符串在编译期就无法构造——
+// KT 端按 tag 名解析（FillMaxSize/WrapContent/Padding/Width/Height/Center）。
+
+enum Modifier { Plain(), FillMaxSize(), WrapContent(), Padding(Nat), Width(Nat), Height(Nat) }
+
+fun fillMaxSize(): Modifier = FillMaxSize()
+fun wrapContent(): Modifier = WrapContent()
+fun padding(n: Nat): Modifier = Padding(n)
+fun width(n: Nat): Modifier = Width(n)
+fun height(n: Nat): Modifier = Height(n)

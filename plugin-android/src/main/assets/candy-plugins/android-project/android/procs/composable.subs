@@ -1,0 +1,50 @@
+// composable.subs —— @composable 处理器（android doc/安卓标准库.md §视图结构体）
+// @interested view：只要工程里有 @view 结构体就运行（纪律校验跨注解：@view 只能在 @composable 里构造）。
+// @interested view
+//
+// 职责：
+//   1. 校验：视图结构体（@view）只能在 @composable 函数里构造；
+//      在普通函数里构造 → processorError（视图树必须由可组合函数建立）。
+//   2. 校验：@composable 函数体内不得出现非视图的副作用自由逻辑之外的构造 ——
+//      保持宽松：只强制视图构造纪律，普通表达式照常。
+//
+// 为什么要校验而非变换：@composable 是函数的标记注解（KT 端按它决定可重组范围），
+// 变换部分由 view.subs 承担；本处理器只产出诊断，不改 AST → 天然幂等（零轮收敛）。
+
+// 查询当前所有 @view 结构体名。
+fun isView(name: Str): Bool = structHasAnnotation(name, "view")
+
+fun checkFuns(xs: List[Str]): Null =
+    when (xs) {
+        Nil => null
+        is Cons(f, rest) => { checkOne(f); checkFuns(rest) }
+        else => null
+    }
+
+fun checkOne(fn: Str): Null {
+    var sites: List[Str] = viewCtorSites(0);
+    var mine: List[Str] = filterSites(sites, fn);
+    var ok: Bool = funHasAnnotation(fn, "composable")
+    reportSites(mine, ok)
+}
+
+fun reportSites(xs: List[Str], ok: Bool): Null =
+    when (xs) {
+        Nil => null
+        is Cons(line, rest) => {
+            if (!ok) processorError("视图结构体只能在 @composable 函数里构造：" + line) else null;
+            reportSites(rest, ok)
+        }
+        else => null
+    }
+
+fun filterSites(xs: List[Str], fn: Str): List[Str] =
+    when (xs) {
+        Nil => Nil
+        is Cons(line, rest) =>
+            if (startsWith(line, fn + "|")) Cons(line, filterSites(rest, fn))
+            else filterSites(rest, fn)
+        else => Nil
+    }
+
+checkFuns(funNames(0))

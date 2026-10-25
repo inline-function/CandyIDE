@@ -1,0 +1,9 @@
+// android/Switch.subl —— 开关视图（MD MaterialSwitch）
+
+@view struct Switch(
+    checked: Bool = false,
+    enabled: Bool = true,
+    onToggle: @impure (Bool) => Null = fun(b: Bool): Null { null },
+    modifier: Modifier = Plain(),
+    body: () => Null = fun(): Null { null }
+)

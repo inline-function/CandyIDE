@@ -1,0 +1,13 @@
+// android/Text.subl —— 文本视图（android doc/安卓标准库.md §布局）
+//
+// color 为 "#RRGGBB" 十六进制；size 单位为 sp；maxLines 为最大行数（0=不限）。
+
+@view struct Text(
+    text: Str = "",
+    color: Str = "",
+    size: Rat = 0.0,
+    bold: Bool = false,
+    italic: Bool = false,
+    maxLines: Nat = 0,
+    modifier: Modifier = Plain()
+)

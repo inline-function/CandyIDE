@@ -1,0 +1,11 @@
+// android/Button.subl —— 按钮视图（android doc/安卓标准库.md §布局）
+//
+// @view 视图结构体（叶子视图）：body 可装文本子视图（如 Text）。
+// onClick 是点击事件回调——KT 端注入监听器，触发时回调 JS 端注册的 lambda。
+
+@view struct Button(
+    modifier: Modifier = Plain(),
+    enabled: Bool = true,
+    onClick: @impure (Any) => Null = fun(_: Any): Null { null },
+    body: () => Null = fun(): Null { null }
+)

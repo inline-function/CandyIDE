@@ -17,6 +17,8 @@ dependencyResolutionManagement {
 rootProject.name = "CandyIDE"
 
 include(":app")
+include(":plugin-api")
+include(":plugin-android")
 include(":jsapk-template")
 include(":desktop")
 

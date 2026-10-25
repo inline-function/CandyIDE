@@ -1,0 +1,17 @@
+{
+  "id": "android-project",
+  "name": "安卓工程支持",
+  "version": "1.0.0",
+  "description": "安卓原生工程：@composable 视图 + @android 内建，编译为原生 APK；含 jsapk 打包、LiteASDK 工具链导入、Shizuku 静默安装与布局预览虚拟桥接",
+  "author": "CandyIDE",
+  "entryClass": "candy.plugin.android.AndroidProjectPlugin",
+  "contributions": [
+    "project-type:jsapk",
+    "editor-view:compose-preview",
+    "lsp-extension:android-stdlib",
+    "settings-section:litea-sdk",
+    "project-settings-section:jsapk",
+    "app-installer:shizuku"
+  ],
+  "minIdeVersion": "2.0.0"
+}

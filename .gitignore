@@ -9,3 +9,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# ????/?????????
+/.kotlin
+/.gradle-dsh
+/desktop/build
+/plugin-api/build
+/plugin-android/build
+# ??????
+/c.txt
+/c-utf8.log
+/app.log
+/Typography.class

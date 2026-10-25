@@ -1,0 +1,9 @@
+// android/Checkbox.subl —— 复选框（MD MaterialCheckBox）
+
+@view struct Checkbox(
+    checked: Bool = false,
+    text: Str = "",
+    onToggle: @impure (Bool) => Null = fun(b: Bool): Null { null },
+    modifier: Modifier = Plain(),
+    body: () => Null = fun(): Null { null }
+)

@@ -1,0 +1,17 @@
+// android/platform.subl —— 平台能力（android doc/安卓标准库.md §平台能力）
+//
+// JS 端做不到或很难做到的原生能力：剪贴板、持久存储、屏幕参数、屏幕常亮、
+// 触感反馈、安装的应用、文件选取（异步回调）。
+
+@android @impure fun clipboardSet(text: Str): Null
+@android @impure fun clipboardGet(): Str
+@android @impure fun storagePut(key: Str, value: Str): Null
+@android @impure fun storageGet(key: Str): Str
+@android @impure fun keepScreenOn(on: Bool): Null
+@android @impure fun vibrate(ms: Nat): Null
+@android @impure fun screenWidth(): Nat
+@android @impure fun screenHeight(): Nat
+@android @impure fun screenDensity(): Nat
+@android @impure fun fmtTime(ms: Nat): Str
+@android @impure fun installedApps(): List[Str]
+@android @impure fun pickFile(mime: Str, then: @impure (Str) => Null): Null

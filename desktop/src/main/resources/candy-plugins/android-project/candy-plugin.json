@@ -1,0 +1,15 @@
+{
+  "id": "android-project",
+  "name": "安卓工程支持",
+  "version": "1.0.0",
+  "description": "安卓原生工程：@composable 视图 + @android 内建的编辑期支持（诊断/补全/布局预览）与 JS 控制台运行；APK 打包为安卓端专属能力",
+  "author": "CandyIDE",
+  "entryClass": "candy.ide.desktop.plugin.android.DesktopAndroidProjectPlugin",
+  "contributions": [
+    "project-type:jsapk",
+    "editor-view:compose-preview",
+    "lsp-extension:android-stdlib",
+    "project-settings-section:jsapk-info"
+  ],
+  "minIdeVersion": "2.0.0"
+}
