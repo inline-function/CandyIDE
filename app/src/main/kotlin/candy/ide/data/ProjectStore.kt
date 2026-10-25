@@ -90,23 +90,23 @@ object ProjectStore {
     /** 把工程标记为内置（只读） */
     fun markBuiltin(dir: CandyPath) = runCatching { dir.child(BUILTIN_MARKER).writeText("1") }
 
-    /** 读工程类型：有标记读标记，否则按内容里有无 .subl 推断，兜底 JS 平台 */
+    /** 读工程类型：有标记读标记，否则问插件认领（如 @composable/@android → 安卓工程），再按 .subl/.md 推断 */
     fun typeOf(dir: CandyPath): String {
         val meta = dir.find(META)
         if (meta?.isFile() == true) {
             val raw = runCatching { meta.readText() }.getOrNull() ?: ""
             val t = raw.substringAfter("type=", "").substringBefore("\n").trim()
             if (t == TYPE_JS || t == TYPE_SCRIPT || t == TYPE_JSAPK || t == TYPE_MD) return t
+            // 插件注册的工程类型（其 typeId 由插件声明）也认
+            if (candy.ide.plugin.PluginRegistry.projectTypes().any { it.typeId == t }) return t
         }
+        // 无类型标记：先问插件的认领（android-project：@composable/@android 内容认领为 jsapk）
+        val claimed = candy.ide.plugin.PluginRegistry.projectTypes().firstOrNull {
+            runCatching { it.claimsProject(dir) }.getOrDefault(false)
+        }
+        if (claimed != null) return claimed.typeId
         val hasSubl = dir.walk().any { it.isFile() && it.name.endsWith(".subl") }
-        if (hasSubl) {
-            // 源码里用安卓注解（@composable/@android）→ 安卓工程（原生 APK 链路）
-            val androidish = dir.walk().any { f ->
-                f.isFile() && f.name.endsWith(".subl") && runCatching { f.readText() }
-                    .getOrNull().orEmpty().let { it.contains("@composable") || it.contains("@android") }
-            }
-            return if (androidish) TYPE_JSAPK else TYPE_JS
-        }
+        if (hasSubl) return TYPE_JS
         val hasMd = dir.walk().any { it.isFile() && it.name.endsWith(".md") }
         return if (hasMd) TYPE_MD else TYPE_SCRIPT
     }

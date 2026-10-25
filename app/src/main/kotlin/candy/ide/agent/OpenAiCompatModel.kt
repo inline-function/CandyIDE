@@ -109,6 +109,7 @@ class OpenAiCompatModel(
                                     val reason = delta.optString("reasoning_content")
                                         .ifEmpty { delta.optString("reasoning") }
                                     if (reason.isNotEmpty()) {
+                                        android.util.Log.w("CandyModel", "sse reason len=" + reason.length + " piece=" + reason.take(30))
                                         reasonAccum.append(reason)
                                         emit(LlmResponse(
                                             content = Content(parts = listOf(Part(text = "§think§" + reason)), role = "model"),

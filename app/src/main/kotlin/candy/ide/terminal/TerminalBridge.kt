@@ -3,7 +3,7 @@ package candy.ide.terminal
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import candy.ide.jsapk.ShizukuShell
+import candy.plugin.android.shizuku.ShizukuShell
 import java.io.File
 
 /**

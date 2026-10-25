@@ -116,7 +116,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.DropdownMenu
 
-private data class LongPressMenu(val x: Float, val y: Float, val line: Int, val col: Int, val preview: candy.ide.ui.ComposePreviewState? = null)
+private data class LongPressMenu(val x: Float, val y: Float, val line: Int, val col: Int, val preview: candy.ide.plugin.preview.ComposePreviewState? = null)
 
 private data class RenameRequest(val word: String, val line: Int, val col: Int)
 
@@ -147,7 +147,7 @@ fun EditorScreen(vm: CandyViewModel) {
     var diagInfo by remember { mutableStateOf<candy.ide.data.DiagItem?>(null) }
     var quickWord by remember { mutableStateOf<String?>(null) }
     // @composable 布局预览悬浮窗：长按 composable 函数弹出；编辑该函数 1s 无错自动刷新
-    var composePreview by remember { mutableStateOf<candy.ide.ui.ComposePreviewState?>(null) }
+    var composePreview by remember { mutableStateOf<candy.ide.plugin.preview.ComposePreviewState?>(null) }
     // 预览布局加载对话框（LSP 首次分析慢，算完再弹悬浮窗）
     var previewLoading by remember { mutableStateOf(false) }
     // 3×3 编辑操作悬浮窗：羽毛笔按钮开关；editSel = 选择状态，editMode = '-'板/ '='板
@@ -252,12 +252,7 @@ fun EditorScreen(vm: CandyViewModel) {
                         title = {
                             Column {
                                 Text(
-                                    when (currentProject?.let { ProjectStore.typeOf(it) }) {
-                                        ProjectStore.TYPE_JSAPK -> "安卓工程"
-                                        ProjectStore.TYPE_SCRIPT -> "脚本工程"
-                        ProjectStore.TYPE_MD -> "MD工程"
-                                        else -> "JS工程"
-                                    },
+                                    currentProject?.let { vm.projectTypeLabel(it) } ?: "JS工程",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = CandyTextDim,
                                     maxLines = 1
@@ -610,16 +605,15 @@ fun EditorScreen(vm: CandyViewModel) {
                                 tonalElevation = 4.dp,
                                 shadowElevation = 10.dp,
                             ) {
-                                candy.ide.ui.ComposePreviewPanel(
+                                val editorExt = candy.ide.plugin.PluginRegistry.editorView()
+                                editorExt?.FloatingPanel(
                                     state = pv,
-                                    fullscreen = false,
-                                    editEnabled = false,   // 悬浮窗只读：编辑请进全屏页
-                                    onToggleFullscreen = { vm.openComposePreviewFull(pv) },   // 像 AI 助手那样单开一页全屏
+                                    onToggleFullscreen = { vm.openComposePreviewFull(pv) },
                                     onClose = { composePreview = null; previewOffset = androidx.compose.ui.unit.IntOffset.Zero },
                                     onApply = { _ ->
                                         // 重生成整段函数体会丢 @mut var 声明与按钮逻辑：
                                         // 树编辑仅预览内生效，等带源码区间的精确补丁再开启写回
-                                        },
+                                    },
                                     onDrag = { delta -> previewOffset = androidx.compose.ui.unit.IntOffset(previewOffset.x + delta.x, previewOffset.y + delta.y) },
                                 )
                             }

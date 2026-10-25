@@ -167,6 +167,7 @@ class CandyAgent(private val ctx: Context) {
                         val hasCalls = r.content?.parts?.any { it.functionCall != null } == true
                         if (piece.isNotEmpty() && r.finishReason == null && !hasCalls) {
                             if (piece.startsWith("§think§")) {
+                                dbg("think chunk len=" + piece.length)
                                 // 思考链：单独通道，落 UI 的「思考」气泡，不写历史
                                 emit(eventOf(Content(parts = listOf(Part(text = piece.removePrefix("§think§"))), role = "model"), author = "think"))
                             } else {

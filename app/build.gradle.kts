@@ -59,6 +59,10 @@ android {
 }
 
 dependencies {
+    // 插件框架（plugin-api）与内置插件（android-project：安卓工程支持）
+    implementation(project(":plugin-api"))
+    implementation(project(":plugin-android"))
+
     // 语言引擎：复合构建来自 ../sublimation（includeBuild 直接消费源码产物）
     implementation("sugared.functor:annotationproc:1.1-SNAPSHOT")
     implementation("sugared.functor:frontend:1.1-SNAPSHOT")
@@ -106,5 +110,7 @@ val copyStdlib by tasks.registering(Copy::class) {
 }
 
 tasks.configureEach {
-    if (name == "preBuild") dependsOn(copyStdlib)
+    if (name == "preBuild") {
+        dependsOn(copyStdlib)
+    }
 }

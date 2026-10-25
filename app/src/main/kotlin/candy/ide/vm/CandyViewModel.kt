@@ -23,18 +23,16 @@ import candy.ide.data.ProjectStore
 import candy.ide.data.Settings
 import candy.ide.editor.Schemes
 import candy.ide.engine.Engine
-import candy.ide.jsapk.JsApkBuilder
-import candy.ide.jsapk.JsApkConfig
 import candy.ide.ui.Screen
+import candy.ide.plugin.BuiltInPluginIndex
+import candy.ide.plugin.PluginLoader
+import candy.ide.plugin.PluginRegistry
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
 import sugared.functor.lsp.DiagnosticSeverity
 import sugared.functor.lsp.LspAnalysis
 import sugared.functor.lsp.Position
 import sugared.functor.lsp.Range
 import sugared.functor.lsp.TextEdit
-import sugared.functor.annotationproc.ProcessorPipeline
-import sugared.functor.annotationproc.ScriptProcessor
-import sugared.functor.checker.MultiModule
 import candy.ide.fs.CandyFs
 import candy.ide.fs.CandyPath
 import java.io.File
@@ -43,10 +41,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val io = Executors.newSingleThreadExecutor { r ->
+    internal val io = Executors.newSingleThreadExecutor { r ->
         Thread(r, "candy-engine").apply { isDaemon = true }
     }
-    private val main = Handler(Looper.getMainLooper())
+    internal val main = Handler(Looper.getMainLooper())
+    /** 插件宿主面：PluginHost 实现（插件经它访问 VM 能力，不直接持有 VM；懒加载，bootstrap 时首次取用） */
+    internal val pluginHost by lazy { CandyPluginHost(this) }
 
     val screen = mutableStateOf(Screen.Projects)
     val projects = mutableStateListOf<CandyPath>()
@@ -175,12 +175,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             LspAnalysis().apply {
                 val stdlib = File(Engine.root(getApplication()), "stdlib")
                 loadPrelude(if (stdlib.isDirectory) stdlib else null)
-                // @android 声明的只读跳转：android/stdlib 也交给 LSP
-                val androidStd = File(Engine.root(getApplication()), "android/stdlib")
-                if (androidStd.isDirectory) setAndroidStdlibDir(androidStd)
-                // 安卓处理器脚本（allMut/android/composable/view）：编辑期跑处理器后再检查，与编译链同构
-                val androidProcs = File(Engine.root(getApplication()), "android/procs")
-                if (androidProcs.isDirectory) setAndroidProcsDir(androidProcs)
+                // 插件的语言服务扩展（android-stdlib：@android 内建 + 处理器脚本）一并注册；
+                // 各扩展的 isEnabled() 每次查询实时生效（t14 扩展点契约）
+                PluginRegistry.lspExtensions().forEach { registerExtension(it) }
             }
         }.onFailure {
             mdLog("**[语言服务]** 初始化失败 · " + (it.message ?: it.javaClass.simpleName))
@@ -251,7 +248,8 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         io.execute {
             try {
                 Engine.bootstrap(getApplication())
-                androidBootstrap()
+                // 插件框架：扫描 assets/candy-plugins/* 装载并 setup（内置插件经 BuiltInPluginIndex 绑定）
+                PluginLoader.loadAll(getApplication(), pluginHost, BuiltInPluginIndex::resolve)
                 Settings.attach(getApplication())
                 candy.ide.git.GitManager.appCtx = getApplication()
                 schemeVersion.intValue++
@@ -269,14 +267,22 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         projects.addAll(ProjectStore.listProjects(getApplication()))
     }
 
+    /** 工程类型显示名（插件类型问注册表，内置类型走宿主字典） */
+    fun projectTypeLabel(dir: CandyPath?): String {
+        if (dir == null) return ""
+        val type = ProjectStore.typeOf(dir)
+        return PluginRegistry.projectType(type)?.displayName() ?: when (type) {
+            ProjectStore.TYPE_SCRIPT -> "脚本工程"
+            ProjectStore.TYPE_MD -> "MD工程"
+            else -> "JS工程"
+        }
+    }
+
     fun createProject(name: String, type: String) {
         io.execute {
             ProjectStore.create(getApplication(), name)?.let { dir ->
                 ProjectStore.writeType(dir, type)
                 when (type) {
-                    // 安卓工程（SfA 原生链）：@android 内建 + @composable 视图树样板
-                    // 安卓工程（SfA 原生链）：最小 @composable 视图树骨架
-                    ProjectStore.TYPE_JSAPK -> dir.child("main.subl").writeText(JSAPK_TEMPLATE)
                     ProjectStore.TYPE_SCRIPT -> dir.child("hello.subs").writeText(SCRIPT_DEMO_SOURCE)
                                     // md 文档工程：只有 md 文件，不含可执行代码
                     ProjectStore.TYPE_MD -> {
@@ -331,8 +337,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     fun openProject(dir: CandyPath) {
         // 打开时间顶上去：主页工程卡按「上次打开时间」排序
         ProjectStore.touchOpened(dir)
-        // 安卓工程（SfA）：编辑期把 android/stdlib 并入检查（Box/Text/log 等才不报未定义）
-        runCatching { analysis()?.setAndroidStdlibEnabled(ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) }
+        // 工程类型变化通知插件（android-project：编辑期把 android/stdlib 并入检查）
+        val openType = ProjectStore.typeOf(dir)
+        runCatching { PluginRegistry.plugins.forEach { it.instance?.onProjectTypeChanged(openType, dir) } }
         val first = dir.walk()
             .filter { it.isFile() && (it.name.endsWith(".subs") || it.name.endsWith(".subl")) }
             .minByOrNull { it.name }
@@ -696,6 +703,12 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 for (m in chat) if (m.reasoning) m.thinking = false
                 val last = chat.lastOrNull()
                 if (last != null && last.thinking && !last.reasoning) chat.removeAt(chat.lastIndex)
+                // 临时诊断：转储对话气泡状态
+                val sb = StringBuilder("[chatdump] n=" + chat.size)
+                chat.forEach { m ->
+                    sb.append(" | " + m.role + "/" + (if (m.reasoning) "R" else "-") + (if (m.thinking) "T" else "-") + "/" + m.text.length + ":" + m.text.take(24).replace("\n", " "))
+                }
+                android.util.Log.w("CandyChat", sb.toString())
                 onAgentTurnDone()
             }
         }
@@ -780,20 +793,6 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 在工程内生成自签名 jks 证书；成功返回相对路径，失败返回原因 */
-    fun generateCert(project: CandyPath, alias: String, pass: String, cn: String, years: Int): String {
-        if (alias.isBlank()) return "别名不能为空"
-        if (pass.length < 6) return "密码至少 6 位"
-        if (cn.isBlank()) return "CN 不能为空"
-        val name = alias.trim() + ".jks"
-        val d = project.find("certificates") ?: project.createDirectory("certificates")!!
-        val target = d.find(name) ?: d.child(name)
-        val r = candy.ide.jsapk.JksWriter.generate(target, alias.trim(), pass.toCharArray(), cn.trim(), years.coerceIn(1, 30))
-        return r.fold(
-            onSuccess = { "certificates/" + name },
-            onFailure = { "生成失败：" + (it.message ?: it.javaClass.simpleName) },
-        )
-    }
 
 
     /** 解压归档到同名目录（工程内），完成后刷新文件树 */
@@ -1147,37 +1146,23 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 if (project != null && ProjectStore.typeOf(project) == ProjectStore.TYPE_MD)
                     throw RuntimeException("md 文档工程不可运行：长按「运行」打包成文档 APK")
                 val type = if (project != null) ProjectStore.typeOf(project) else ProjectStore.TYPE_JS
-                if (type == ProjectStore.TYPE_JS || (type == ProjectStore.TYPE_JSAPK && project?.find("jsapk.json")?.isFile() == true)) {
-                    mdLog("**[运行]** `" + file.name + "` 编译 → JS → WebView")
-                    Engine.run(getApplication(), file,
-                        onLine = { line -> main.post { outputLines.add(line) } },
-                    // 编译在 IO 线程同步完成；JS 执行异步，收尾回调在主线程
-                        onDone = {
-                            mdLog("**[运行结束]**")
-                            main.post { runFailed.value = false }
-                            running.value = false
-                            setDrawerTabMain(0)
-                        },
-                        onCompiled = { ms -> mdLog("**[编译完成]** 用时 " + fmtElapsed(ms)) },
-                        onInput = { readlnDialog() },
-                    )
-                } else if (type == ProjectStore.TYPE_JSAPK) {
-                    // 短按 = 虚拟桥接环境（模拟安装后效果，仅渲染不运行）；长按「运行」才是打包 APK
-                    main.post {
-                        running.value = false
-                        openVirt()
+                val pluginType = PluginRegistry.projectType(type)
+                when {
+                    // 插件工程类型（如 jsapk）：有 jsapk.json 走 JS 控制台，否则进虚拟桥接环境
+                    pluginType != null -> pluginType.runShort(pluginHost)
+                    type == ProjectStore.TYPE_JS -> runCurrentAsJsConsole()
+                    else -> {
+                        mdLog("**[运行]** `" + file.name + "` 脚本直连解释器")
+                        Engine.runScript(getApplication(), file,
+                            onLine = { line -> main.post { outputLines.add(line) } },
+                            onDone = {
+                                mdLog("**[运行结束]**")
+                                main.post { runFailed.value = false }
+                                running.value = false
+                                setDrawerTabMain(0)
+                            },
+                        )
                     }
-                } else {
-                    mdLog("**[运行]** `" + file.name + "` 脚本直连解释器")
-                    Engine.runScript(getApplication(), file,
-                        onLine = { line -> main.post { outputLines.add(line) } },
-                        onDone = {
-                            mdLog("**[运行结束]**")
-                            main.post { runFailed.value = false }
-                            running.value = false
-                            setDrawerTabMain(0)
-                        },
-                    )
                 }
             } catch (t: Throwable) {
                 val msg = t.message?.replace("`", "'") ?: t.javaClass.simpleName
@@ -1235,67 +1220,39 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         inputLatch = null
     }
 
-    // ---- JS-apk 打包 ----
+    // ---- JS 控制台运行：编译 → JS → WebView（JS 平台工程与 jsapk.json 控制台模式共用） ----
 
-    /** 当前工程的入口 .subl（有 jsapk.json 读 entry，没有就取第一个 .subl） */
-    private fun jsapkEntry(project: CandyPath): CandyPath? {
-        // 走 JsApkConfig 的 org.json 解析：手工 substringAfter 截到行尾会把整段 JSON 粘进文件名
-        val entry = runCatching { JsApkConfig.load(project).entry }.getOrNull()
-        val candidate = entry?.let { project.find(it) }
-        return when {
-            candidate?.isFile() == true -> candidate
-            else -> project.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
-        }
-    }
-
-    /** 编译 → 注入模板 APK → v1 签名 → <工程>/build/app.apk；按设置直接静默安装或弹确认 */
-    /** 工程名 → Android 合法包名段：只留 ASCII 字母数字下划线（isLetterOrDigit 会放过汉字），
-     *  空串或数字开头补 app 前缀 */
-    fun asciiPackageSeed(name: String): String {
-        val clean = name.lowercase().filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }
-        return if (clean.isEmpty() || clean.first().isDigit()) "app" + clean else clean
-    }
-
-    /** 指定工程打包：有 jsapk.json（JS-apk 或 JS 平台工程在设置页配过）走它，否则 JS 平台工程用自动 ASCII 包名 */
-    fun buildApkProject(dir: CandyPath) {
-        // md 文档工程走专用打包链路（不编译 subl，只打包文档与阅读器）
-        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_MD) { buildMdApkProject(dir); return }
-        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_SCRIPT) { buildScriptApkProject(dir); return }
-        if (dir.find("jsapk.json")?.isFile() == true) { buildApkIn(dir); return }
-        if (ProjectStore.typeOf(dir) == ProjectStore.TYPE_JSAPK) {
-            // 原生安卓工程（无 jsapk.json）：SfA 链 —— 处理器/编译 → 壳模板注 JS → v1 签名 → 安装
-            running.value = true
-            try {
-                val entry = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
-                    ?: throw RuntimeException("工程里没有 .subl 入口")
-                mdLog("**[打包]** " + entry.name + " 注解处理器 → 编译 → 注进壳模板 → 签名")
-                val js = compileAndroidJs(entry).toByteArray(Charsets.UTF_8)
-                val cfg = candy.ide.jsapk.AndroidApkBuilder.loadConfig(dir)
-                val seed = cfg.pkgSeed.ifBlank { asciiPackageSeed(dir.name) }
-                val pkg = "functor.sublimation." + seed
-                val apk = candy.ide.jsapk.AndroidApkBuilder.build(getApplication(), js, dir, cfg)
-                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
-                mdLog("**[打包]** 包名 " + pkg + (if (cfg.label.isNotBlank()) " · 应用名 " + cfg.label else "") + (if (cfg.icon.isNotBlank()) " · 自定义图标" else "") + (if (cfg.keystore.isNotBlank()) " · 自定义签名" else ""))
+    /** 以 JS 控制台模式运行当前文件（供 PluginHost.runCurrentAsJsConsole 转发；异常抛给调用方的 try） */
+    fun runCurrentAsJsConsole() {
+        val file = currentFile.value ?: return
+        mdLog("**[运行]** `" + file.name + "` 编译 → JS → WebView")
+        Engine.run(getApplication(), file,
+            onLine = { line -> main.post { outputLines.add(line) } },
+            // 编译在 IO 线程同步完成；JS 执行异步，收尾回调在主线程
+            onDone = {
+                mdLog("**[运行结束]**")
                 main.post { runFailed.value = false }
-                if (Settings.silentInstall) installPkg(apk, pkg)
-                else main.post {
-                    pendingPkg.value = pkg
-                    pendingApk.value = apk
-                }
-            } catch (e: Throwable) {
-                mdLog("**[打包失败]** " + ((e as? RuntimeException)?.message ?: e.message ?: e.javaClass.simpleName).substringBefore("\n").take(400))
-                mdLog("**[堆栈]** " + e.stackTraceToString().take(1200).replace("\n", " | "))
-                main.post { runFailed.value = true }
-            } finally {
-                main.post { running.value = false }
-            }
+                running.value = false
+                setDrawerTabMain(0)
+            },
+            onCompiled = { ms -> mdLog("**[编译完成]** 用时 " + fmtElapsed(ms)) },
+            onInput = { readlnDialog() },
+        )
+    }
+
+
+
+    /** 指定工程打包：路由给插件的工程类型贡献（md/script/jsapk.json/原生安卓链都由 android-project 提供） */
+    fun buildApkProject(dir: CandyPath) {
+        val type = ProjectStore.typeOf(dir)
+        // md/script/js（有无 jsapk.json）/jsapk 的打包链路都由 android-project 插件提供：
+        // 插件 packageProject 内部按工程类型分派与旧 VM 路由逐一对应
+        val contrib = PluginRegistry.projectType(type) ?: PluginRegistry.projectType(ProjectStore.TYPE_JSAPK)
+        if (contrib == null) {
+            mdLog("**[打包失败]** 当前工程无可用的打包链路（需要 android-project 插件）")
             return
         }
-        buildApkIn(dir, JsApkConfig(
-            pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
-            label = dir.name,
-            entry = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }?.name ?: "main.subl",
-        ))
+        contrib.packageProject(pluginHost, dir)
     }
 
     fun buildApk() {
@@ -1308,39 +1265,6 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         io.execute { buildApkProject(dir) }
     }
 
-    /** md 文档工程打包：收集 .md → 阅读器壳注进模板 APK → 签名 → build/app.apk */
-    fun buildMdApkProject(dir: CandyPath) {
-        if (running.value) return
-        running.value = true
-        openDrawerTab(1)
-        mdLog("**[打包]** md 文档工程 收集文档 → 注入阅读器 → 签名")
-        io.execute {
-            try {
-                val cfg = JsApkConfig(
-                    pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
-                    label = dir.name,
-                )
-                val apk = candy.ide.jsapk.MdApkBuilder.build(getApplication(), dir, cfg) { n ->
-                    mdLog("**[打包]** 收集到 " + n + " 篇文档")
-                }
-                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
-                mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
-                main.post { runFailed.value = false }
-                if (Settings.silentInstall) installPkg(apk, cfg.pkg)
-                else main.post {
-                    pendingPkg.value = cfg.pkg
-                    pendingApk.value = apk
-                }
-            } catch (t: Throwable) {
-                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName).substringBefore("\n").take(400))
-                mdLog("**[提示]** 完整诊断请看「诊断」页签")
-                mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
-                main.post { runFailed.value = true }
-            } finally {
-                main.post { running.value = false }
-            }
-        }
-    }
 
 // ==================== git 协同 ====================
 
@@ -1642,111 +1566,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         return real ?: ""
     }
 
-    /** 脚本工程打包：顶层语句包一层 @impure fun main，落进 build/__entry__.subl 再走标准链路 */
-    fun buildScriptApkProject(dir: CandyPath) {
-        if (running.value) return
-        running.value = true
-        openDrawerTab(1)
-        mdLog("**[打包]** 脚本工程 收集源码 → 包一层 main → 编译注入")
-        io.execute {
-            try {
-                val src = dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subs") }
-                    ?: dir.walk().firstOrNull { it.isFile() && it.name.endsWith(".subl") }
-                if (src == null) {
-                    mdLog("**[打包失败]** 脚本工程里没有 .subs 源文件")
-                    main.post { running.value = false }
-                    return@execute
-                }
-                val body = src.readText().lines()
-                    .map { if (it.isBlank()) "" else "  " + it }
-                    .joinToString("\n")
-                val wrapperText = "@impure\nfun main() {\n" + body + "\n}\n"
-                // 临时入口放工程根（JsApkBuilder 以入口所在目录为工程根，build/ 由它自建；
-                // 放 build/ 下会导致 build/build/ 嵌套，SAF 抛错）
-                val wrapper = dir.child("__entry__.subl")
-                wrapper.writeText(wrapperText)
-                val cfg = JsApkConfig(
-                    pkg = JsApkConfig.DEFAULT_PACKAGE + "." + asciiPackageSeed(dir.name),
-                    label = dir.name,
-                )
-                val apk = JsApkBuilder.build(getApplication(), wrapper, cfg, onCompiled = { ms ->
-                    mdLog("**[编译完成]** 用时 " + fmtElapsed(ms))
-                })
-                runCatching { wrapper.delete() }
-                mdLog("**[打包完成]** " + apk.name + " " + apk.length() / 1024 + " KB · 路径 " + apk.displayPath)
-                mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
-                main.post { runFailed.value = false }
-                if (Settings.silentInstall) installPkg(apk, cfg.pkg)
-                else main.post {
-                    pendingPkg.value = cfg.pkg
-                    pendingApk.value = apk
-                }
-            } catch (t: Throwable) {
-                runCatching { dir.find("__entry__.subl")?.delete() }
-                mdLog("**[打包失败]** " + (t.message ?: t.javaClass.simpleName).substringBefore("\n").take(400))
-                mdLog("**[提示]** 完整诊断请看「诊断」页签")
-                mdLog("**[堆栈]** " + t.stackTraceToString().take(1500).replace("\n", " | "))
-            } finally {
-                main.post { running.value = false }
-            }
-        }
-    }
 
-    /** 工程设置页也能触发：指定工程打包，入口/包名走该工程的 jsapk.json */
-    fun buildApkIn(project: CandyPath, forced: JsApkConfig? = null) {
-        val pj = project
-        if (running.value) return
-        running.value = true
-        openDrawerTab(1)
-        val entry = jsapkEntry(pj)
-        if (entry == null) {
-            mdLog("**[打包失败]** 工程里没有 .subl 源文件")
-            running.value = false
-            return
-        }
-        mdLog("**[打包]** " + entry.name + " 编译 → 注入模板 → 签名")
-        io.execute {
-            try {
-                val cfg = forced ?: JsApkConfig.load(pj)
-                // 自定义证书（工程 jsapk.json 指定的 .jks）
-                val certErr = if (cfg.certPath != null && cfg.certPass != null) {
-                    val jks = pj.find(cfg.certPath!!) ?: pj.walk().firstOrNull { it.name == cfg.certPath?.substringAfterLast('/') }
-                    if (jks == null || !jks.isFile()) "[打包] 证书文件不存在：" + cfg.certPath
-                    else {
-                        val err = candy.ide.jsapk.ApkSigner.loadJks(jks, cfg.certPass!!.toCharArray())
-                        if (err != null) "[打包] " + err else null
-                    }
-                } else {
-                    candy.ide.jsapk.ApkSigner.useCustomKey(null, null)
-                    null
-                }
-                if (certErr != null) {
-                    mdLogUser("**" + certErr + "，改用内置证书**")
-                    candy.ide.jsapk.ApkSigner.useCustomKey(null, null)
-                }
-                val apk = JsApkBuilder.build(getApplication(), entry, cfg, onCompiled = { ms ->
-                    mdLog("**[编译完成]** 用时 " + fmtElapsed(ms))
-                })
-                val sizeKb = apk.length() / 1024
-                mdLog("**[打包完成]** " + apk.name + " " + sizeKb + " KB · 路径 " + apk.displayPath)
-                main.post { runFailed.value = false }
-                if (cfg.pkg != JsApkConfig.DEFAULT_PACKAGE) mdLog("**[打包]** 包名 " + cfg.pkg + " · 应用名 " + cfg.label)
-                if (Settings.silentInstall) installPkg(apk, cfg.pkg)
-                else {
-                    main.post {
-                        pendingPkg.value = cfg.pkg
-                        pendingApk.value = apk
-                    }
-                }
-            } catch (t: Throwable) {
-                mdLog("**[打包失败]** " + (t.message?.replace("`", "'") ?: t.javaClass.simpleName).substringBefore("\n").take(400))
-                    mdLog("**[提示]** 完整诊断请看「诊断」页签")
-                main.post { runFailed.value = true }
-            } finally {
-                main.post { running.value = false }
-            }
-        }
-    }
 
     /** 打包确认对话框：立即安装（Shizuku 流式安装） */
     fun confirmInstallApk() {
@@ -1763,7 +1583,9 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         openDrawerTab(1)
         mdLog("**[安装 APK]** " + apk.name)
         io.execute {
-            val (via, msg) = JsApkBuilder.installViaShizuku(apk)
+            // 静默安装通道来自插件贡献（android-project: Shizuku）；无通道时降级系统安装器
+            val installer = PluginRegistry.installers().firstOrNull()
+            val (via, msg) = installer?.tryInstall(apk, pkg) ?: (false to "无可用的静默安装通道")
             main.post {
                 installing.value = false
                 if (via) {
@@ -1814,205 +1636,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 文件树/任意 apk：包名未知时不传，成功后「打开」走包名兜底失败提示 */
     fun installApk(file: CandyPath) = installPkg(file)
-    // ───────── LiteASDK 工具链：subl → APK 端上构建的精简安卓工具链 ─────────
-    fun liteaSdkDir(): File = File(Engine.root(getApplication()), "litea-sdk")
-    fun liteaSdkReady(): Boolean = runCatching {
-        val d = liteaSdkDir()
-        File(d, "bin/aapt2").isFile && File(d, "lib/android.jar").isFile && File(d, "build").isDirectory
-    }.getOrDefault(false)
-    val liteaImporting = mutableStateOf(false)
-    val liteaImportMsg = mutableStateOf<String?>(null)
-    /** 从本地路径导入（SAF 被厂商文件管理器劫持时的备选入口，如 /sdcard/Download/LiteASDK.zip） */
-    fun importLiteASdkFromPath(path: String) {
-        if (liteaImporting.value) return
-        val src = java.io.File(path)
-        if (!src.isFile) {
-            liteaImportMsg.value = "文件不存在：" + path
-            mdLog("**[工具链导入失败]** 文件不存在：" + path)
-            return
-        }
-        runCatching { importLiteASdkLocal(src) }
-            .onFailure {
-                liteaImportMsg.value = "导入失败：" + (it.message ?: it.javaClass.simpleName)
-                mdLog("**[工具链导入失败]** " + (it.message ?: it.javaClass.simpleName))
-            }
-    }
 
-    /** 解压本地 zip 到 files/candy/litea-sdk；Uri 版与此共用本体 */
-    private fun importLiteASdkLocal(src: java.io.File) {
-        liteaImporting.value = true
-        io.execute {
-            val target = liteaSdkDir()
-            runCatching {
-                target.deleteRecursively()
-                target.mkdirs()
-                val base = target.canonicalPath
-                var entries = 0
-                java.util.zip.ZipInputStream(java.io.BufferedInputStream(src.inputStream())).use { zis ->
-                    var ze = zis.nextEntry
-                    while (ze != null) {
-                        if (!ze.isDirectory) {
-                            val out = File(target, ze.name)
-                            if (!out.canonicalPath.startsWith(base)) {
-                                zis.closeEntry(); ze = zis.nextEntry; continue
-                            }
-                            out.parentFile?.mkdirs()
-                            out.outputStream().use { o -> zis.copyTo(o) }
-                            if (ze.name.startsWith("bin/") ||
-                                (ze.name.startsWith("build/") && ze.name.endsWith(".sh"))) {
-                                out.setExecutable(true, false)
-                            }
-                            entries++
-                        }
-                        zis.closeEntry()
-                        ze = zis.nextEntry
-                    }
-                }
-                val ok = liteaSdkReady()
-                val msg = if (ok) "LiteASDK 已就位（" + entries + " 个文件）：" + target.absolutePath
-                    else "解压完成但缺少关键文件（bin/aapt2、lib/android.jar、build/）。请确认是 LiteASDK 官方分发包"
-                main.post {
-                    liteaImportMsg.value = msg
-                    liteaImporting.value = false
-                    mdLogUser("**[工具链]** " + msg)
-                }
-            }.onFailure { e ->
-                main.post {
-                    liteaImportMsg.value = "导入失败：" + (e.message ?: e.javaClass.simpleName)
-                    liteaImporting.value = false
-                    mdLog("**[工具链导入失败]** " + (e.message ?: e.javaClass.simpleName))
-                }
-            }
-        }
-    }
 
-    // ───────── 原生安卓工程（SfA 模式）：注解处理器 + 安卓标准库 + core ─────────
-    /** assets/android 物化版本：处理器/安卓标准库更新后递增 */
-    private val androidAssetVersion = 4
 
-    /** 释放 assets/android（处理器 .subs + 安卓标准库 .subl）到 files/candy/android */
-    fun androidBootstrap(): Boolean = runCatching {
-        val ctx = getApplication<Application>()
-        val root = Engine.root(ctx)
-        val dir = java.io.File(root, "android")
-        val marker = java.io.File(root, "android.version")
-        val need = !marker.exists() || marker.readText().trim() != androidAssetVersion.toString()
-        if (need) {
-            dir.deleteRecursively(); dir.mkdirs()
-            fun copyAssetTree(assetPath: String, target: java.io.File) {
-                val children = ctx.assets.list(assetPath)
-                if (children == null || children.isEmpty()) {
-                    target.parentFile?.mkdirs()
-                    ctx.assets.open(assetPath).use { ins -> target.outputStream().use { out -> ins.copyTo(out) } }
-                } else {
-                    target.mkdirs()
-                    for (c in children) copyAssetTree("$assetPath/$c", java.io.File(target, c))
-                }
-            }
-            copyAssetTree("android", dir)
-            marker.writeText(androidAssetVersion.toString())
-        }
-        java.io.File(dir, "procs/android.subs").exists()
-    }.getOrDefault(false)
 
-    /** 安卓工程编译：处理器变换 + 全量检查 → JS；失败抛带报告的异常 */
-    fun compileAndroidJs(script: CandyPath): String {
-        val ctx = getApplication<Application>()
-        val project = script.parent ?: script
-        val src = script.readText()
-        // 编译根 = core + 安卓标准库（平铺根模块，与 SfA app/ 同构）+ 工程源
-        val compileRoot = java.io.File(ctx.cacheDir, "candy/androidRoot")
-        compileRoot.deleteRecursively(); compileRoot.mkdirs()
-        val coreSrc = java.io.File(Engine.root(ctx), "core")
-        if (coreSrc.isDirectory) coreSrc.copyRecursively(java.io.File(compileRoot, "core"), overwrite = true)
-        val aStd = java.io.File(Engine.root(ctx), "android/stdlib")
-        if (aStd.isDirectory) aStd.listFiles { f -> f.isFile && f.name.endsWith(".subl") }
-            ?.sortedBy { it.name }?.forEach { it.copyTo(java.io.File(compileRoot, it.name), overwrite = true) }
-        for ((f, rel) in project.walkRelative()) {
-            if (rel.isBlank() || !f.isFile()) continue
-            if (rel.startsWith("build/") || rel.startsWith(".")) continue
-            if (!rel.endsWith(".subl") && !rel.endsWith(".subs") && !rel.endsWith(".settings")) continue
-            val target = java.io.File(compileRoot, rel)
-            target.parentFile?.mkdirs()
-            f.inputStream().use { ins -> target.outputStream().use { out -> ins.copyTo(out) } }
-        }
-        // 处理器装载（文件名=处理器名=关注注解；@interested 声明跨注解关注）
-        val procsDir = java.io.File(Engine.root(ctx), "android/procs")
-        val processors = procsDir.listFiles { f -> f.isFile && f.name.endsWith(".subs") }
-            ?.sortedBy { it.name }?.map { f ->
-                val name = f.name.removeSuffix(".subs")
-                val txt = f.readText()
-                val extra = Regex("@interested\\s+([A-Za-z0-9_, ]+)").find(txt)?.groupValues?.get(1)
-                    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
-                ScriptProcessor(
-                    name = name,
-                    interestedAnnotations = setOf(name) + extra,
-                    scriptSource = txt,
-                    scriptFileName = f.path,
-                    stdlibDir = coreSrc,
-                )
-            } ?: emptyList()
-        val options = mapOf(
-            "appDir" to "", "jsPath" to "", "outDir" to "", "sdkDir" to liteaSdkDir().path,
-        )
-        val mm = MultiModule(compileRoot)
-        val pbag = mm.processModules(ProcessorPipeline.moduleTransformer(processors, options))
-        val bag = mm.checkAll()
-        bag.absorb(pbag)
-        if (bag.hasError) throw RuntimeException("安卓工程编译未通过，请看「诊断」页签\n" + bag.report(source = src))
-        return mm.generateJs()
-    }
 
-    fun importLiteASdk(uri: android.net.Uri) {
-        if (liteaImporting.value) return
-        liteaImporting.value = true
-        io.execute {
-            val target = liteaSdkDir()
-            runCatching {
-                target.deleteRecursively()
-                target.mkdirs()
-                val base = target.canonicalPath
-                var entries = 0
-                val app = getApplication<android.app.Application>()
-                app.contentResolver.openInputStream(uri).use { ins ->
-                    java.util.zip.ZipInputStream(java.io.BufferedInputStream(ins)).use { zis ->
-                        var ze = zis.nextEntry
-                        while (ze != null) {
-                            if (!ze.isDirectory) {
-                                val out = File(target, ze.name)
-                                if (!out.canonicalPath.startsWith(base)) {
-                                    zis.closeEntry(); ze = zis.nextEntry; continue
-                                }
-                                out.parentFile?.mkdirs()
-                                out.outputStream().use { o -> zis.copyTo(o) }
-                                if (ze.name.startsWith("bin/") ||
-                                    (ze.name.startsWith("build/") && ze.name.endsWith(".sh"))) {
-                                    out.setExecutable(true, false)
-                                }
-                                entries++
-                            }
-                            zis.closeEntry()
-                            ze = zis.nextEntry
-                        }
-                    }
-                }
-                val ok = liteaSdkReady()
-                val msg = if (ok) "LiteASDK 已就位（" + entries + " 个文件）：" + target.absolutePath
-                    else "解压完成但缺少关键文件（bin/aapt2、lib/android.jar、build/）。请确认 zip 是 LiteASDK 官方分发包"
-                main.post {
-                    liteaImportMsg.value = msg
-                    liteaImporting.value = false
-                    mdLogUser("**[工具链]** " + msg)
-                }
-            }.onFailure { e ->
-                main.post {
-                    liteaImportMsg.value = "导入失败：" + (e.message ?: e.javaClass.simpleName)
-                    liteaImporting.value = false
-                    mdLog("**[工具链导入失败]** " + (e.message ?: e.javaClass.simpleName))
-                }
-            }
-        }
-    }
 
 
     /** 用其它应用打开（FileProvider 授权读） */
@@ -2229,7 +1857,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun mdLog(md: String) {
+    internal fun mdLog(md: String) {
         main.post { buildLog.add(md) }
         appendLogFile(md)
     }
@@ -2295,25 +1923,31 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     /** @composable 布局预览悬浮窗：长按/光标命中 composable 函数时取结构化视图树。
      *  返回 ComposePreviewState（函数名 + 声明行范围 + 视图树 JSON）；由 EditorScreen 渲染为缩略布局。
      */
-    fun composePreviewState(line: Int, col: Int): candy.ide.ui.ComposePreviewState? {
+    /** LSP：@composable 函数的视图树 JSON（无则 null）；宿主 PluginHost.composableTreeJson 转发 */
+    fun composableTreeJson(line: Int, col: Int): String? {
         val f = currentFile.value ?: return null
         val name = f.name
         if (!name.endsWith(".subl") && !name.endsWith(".subs")) return null
         val analysis = analysis() ?: return null
-        val res = runCatching {
+        return runCatching {
             ensureSynced(analysis, name, savedTexts[f.key] ?: loadTextFor(f))
-            val json = analysis.composableTreeJson(name, sugared.functor.lsp.Position(line, col))
-            if (json == null) return@runCatching null
-            val o = org.json.JSONObject(json)
-            candy.ide.ui.ComposePreviewState(
-                fnName = o.optString("name"),
-                start = o.optInt("start"),
-                end = o.optInt("end"),
-                treeJson = json,
-            )
-        }
-        return res.getOrNull()
+            analysis.composableTreeJson(name, sugared.functor.lsp.Position(line, col))
+        }.getOrNull()
     }
+
+    fun composePreviewState(line: Int, col: Int): candy.ide.plugin.preview.ComposePreviewState? {
+        val json = composableTreeJson(line, col) ?: return null
+        val o = org.json.JSONObject(json)
+        return candy.ide.plugin.preview.ComposePreviewState(
+            fnName = o.optString("name"),
+            start = o.optInt("start"),
+            end = o.optInt("end"),
+            treeJson = json,
+        )
+    }
+
+    /** 编辑器缓存优先的文件正文（供插件 PluginHost.currentFileText 转发） */
+    internal fun textOf(f: CandyPath): String? = savedTexts[f.key] ?: loadTextFor(f)
     /** 虚拟桥接环境入口：layout(根组合函数) 调用 → 找到 @composable 函数 → 全屏渲染模拟
      *  仅渲染不运行：应用点击事件被拦截（按钮不触发 onClick）
      */
@@ -2356,22 +1990,22 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 虚拟桥接环境的视图树状态 */
-    val virtState = mutableStateOf<candy.ide.ui.ComposePreviewState?>(null)
+    val virtState = mutableStateOf<candy.ide.plugin.preview.ComposePreviewState?>(null)
     // 布局预览独立全屏页（像 AI 助手页那样单开一页）：编辑器里点「全屏」时挂上
-    val composePreviewFull = mutableStateOf<candy.ide.ui.ComposePreviewState?>(null)
+    val composePreviewFull = mutableStateOf<candy.ide.plugin.preview.ComposePreviewState?>(null)
     /** 进入预览全屏页（树来自当前编辑器的 @composable 函数） */
-    fun openComposePreviewFull(pv: candy.ide.ui.ComposePreviewState) {
+    fun openComposePreviewFull(pv: candy.ide.plugin.preview.ComposePreviewState) {
         composePreviewFull.value = pv
         screen.value = candy.ide.ui.Screen.Preview
     }
     /** 预览全屏页写回源码：保留函数签名行（含 @composable），替换函数体；编辑器返回后按新正文重载 */
         /** 预览全屏页写回源码：只对改动节点做精确补丁（属性就地改、新增插入、删节点删行），保留函数体其余部分 */
-    fun applyPreviewTree(treeJson: String, pv: candy.ide.ui.ComposePreviewState) {
+    fun applyPreviewTree(treeJson: String, pv: candy.ide.plugin.preview.ComposePreviewState) {
         val f = currentFile.value ?: return
         runCatching {
             val content = loadTextFor(f)
             if (content.isEmpty()) return
-            val newText = candy.ide.vm.PreviewPatch.apply(content, pv.treeJson, treeJson) ?: return
+            val newText = candy.ide.plugin.preview.PreviewPatch.apply(content, pv.treeJson, treeJson) ?: return
             saveCurrent(newText)
             // 编辑器立即以新正文重载（回到编辑器页就能看到写回的函数体）
             forceReloadNonce.intValue++
@@ -2481,19 +2115,6 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         private const val SCRIPT_DEMO_SOURCE = """print("hello,world!")
 """ 
 
-        // 新建安卓工程的最小骨架：一个 @composable 函数 + layout 挂载
-        private const val JSAPK_TEMPLATE = """@composable
-fun content(): Box {
-    return Box(modifier = Plain()) {
-        Text(text = "hello", size = 16)
-    }
-}
-
-fun main(): Null {
-    onCreate { unchecked log("started", 1) }
-    onStart { layout(content) }
-}
-"""
 
         // 新建 JS 工程的最小骨架
         private const val JS_TEMPLATE = """fun main() {

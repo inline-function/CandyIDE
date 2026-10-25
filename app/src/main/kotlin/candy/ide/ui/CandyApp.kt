@@ -40,6 +40,20 @@ import candy.ide.ui.theme.CandyBg
 import candy.ide.ui.theme.CandySurfaceVariant
 import candy.ide.ui.theme.CandyText
 import candy.ide.vm.CandyViewModel
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+
+/** 贡献缺失兜底页（如 android-project 插件未装载时的 Virt/Preview） */
+@Composable
+private fun NoPluginScreen() {
+    Box(
+        modifier = Modifier.fillMaxSize().background(CandyBg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("需要 android-project 插件支持此页面", color = CandyTextDim)
+    }
+}
 
 enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource, Stdlib, Virt, Preview }
 
@@ -293,8 +307,18 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
         Screen.IdeLog -> IdeLogScreen(vm)
         Screen.Terminal -> TerminalScreen(vm)
         Screen.Agent -> AgentScreen(vm)
-        Screen.Virt -> candy.ide.ui.VirtScreen(vm)
-    Screen.Preview -> candy.ide.ui.PreviewScreen(vm)
+                    Screen.Virt -> candy.ide.plugin.PluginRegistry.editorView()?.let { ext ->
+                        // 虚拟桥接环境（仅渲染不运行）：容器与返回键归宿主，渲染由插件贡献
+                        ext.VirtScreen(vm.virtState.value) { vm.screen.value = Screen.Editor }
+                    } ?: NoPluginScreen()
+                    Screen.Preview -> candy.ide.plugin.PluginRegistry.editorView()?.let { ext ->
+                        // 布局预览全屏构建页：树编辑写回源码后回编辑器
+                        ext.PreviewScreen(
+                            state = vm.composePreviewFull.value,
+                            onBack = { vm.composePreviewFull.value = null; vm.screen.value = Screen.Editor },
+                            onApply = { tree, pv -> vm.applyPreviewTree(tree, pv) },
+                        )
+                    } ?: NoPluginScreen()
         Screen.Git -> GitScreen(vm)
         Screen.ProjectLinks -> LinkListScreen(
             vm = vm,

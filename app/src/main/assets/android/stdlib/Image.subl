@@ -1,9 +1,0 @@
-// android/Image.subl —— 图标视图
-//
-// name 为 drawable 资源名：先查应用资源，再查系统（"android:ic_menu_info"）。
-
-@view struct Image(
-    name: Str = "",
-    modifier: Modifier = Plain(),
-    body: () => Null = fun(): Null { null }
-)
