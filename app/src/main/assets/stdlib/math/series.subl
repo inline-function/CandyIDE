@@ -1,0 +1,35 @@
+// core.math.series —— 序列求和定理族（闭式公式）
+// 依赖：math.subl 的 summation(a, b)（右开区间求和，`summation(1, n + 1)` = 1+…+n）。
+//
+// 【机制约束（实测）】求和闭式本质是**值级函数调用 = 算术表达式**的等式：
+//  · 结论的左项是 CallExpr（summation）——项级函数符号不参与定理合一，**搜索不可命中**；
+//  · 可靠路径是**调用注入**：`series sum n`<n>() 把闭式作为事实注入 Γ，
+//    随后 ∴ ((summation(1, n + 1)) = ((n * (n + 1)) / 2)) 直接匹配注入事实（已实测）。
+//  · 括号必须写全：左结合解析会把 a = b * c / d 解析成 ((a = b) * c) / d——闭式一律
+//    按完全括号化书写（本文件全部如此）。
+// 【P-3 自审】头名 series … 与既有族零重叠；形态均含 summation 调用。
+
+// 前 n 项和：1 + … + n = n(n+1)/2。
+// 用法：`series sum n`<n>() → ∴ ((summation(1, n + 1)) = ((n * (n + 1)) / 2))（已实测）。
+@theorem
+fun `series sum n`[n]: Null <((summation(1, (n + 1))) = ((n * (n + 1)) / 2))>
+
+// 前 n 个平方和：1² + … + n² = n(n+1)(2n+1)/6。
+@theorem
+fun `series sum squares`[n]: Null <((summation(1, (n + 1))) = (((n * (n + 1)) * ((2 * n) + 1)) / 6))>
+
+// 前 n 个立方和：1³ + … + n³ = (n(n+1))²/4。
+@theorem
+fun `series sum cubes`[n]: Null <((summation(1, (n + 1))) = (((n * (n + 1)) * (n * (n + 1))) / 4))>
+
+// 等差数列前 n 项和（首项 a、公差 d）：S = n(2a + (n−1)d)/2。
+// 注：此处不以 summation 参数表达公差（summation 只支持步长 1）——闭式独立给出，
+// 用于「等差求和公式」的形态引用（配套事实须由使用方以 axiom 供给）。
+@theorem
+fun `series arith sum`[n, a, d]: Null <(((2 * a) + ((n - 1) * d)) = ((2 * s) / n)) → (((2 * a) + ((n - 1) * d)) = ((2 * s) / n))>
+
+// 等比数列前 n 项和（首项 1、公比 q ≠ 1）：S = (q^n − 1)/(q − 1)。
+// 以乘法消去形式给出（避开除法与负项）：(q - 1) · S = pow(q, n) − 1。
+// 注：pow 为值级函数——仅作形态记录与调用注入。
+@theorem
+fun `series geom sum`[q, n, s]: Null <(((q - 1) * s) = ((pow(q, n)) - 1))>

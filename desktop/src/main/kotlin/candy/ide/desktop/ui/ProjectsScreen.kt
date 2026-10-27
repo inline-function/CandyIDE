@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.FolderOpen
@@ -71,6 +72,9 @@ fun ProjectsScreen(state: IdeState) {
             TopAppBar(
                 title = { CandyTitleWithEgg() },
                 actions = {
+                    IconButton(onClick = { state.screen = DesktopScreen.Plugins }) {
+                        Icon(Icons.Default.Extension, contentDescription = "插件", tint = CandyText)
+                    }
                     IconButton(onClick = { state.screen = DesktopScreen.Docs }) {
                         Icon(Icons.Default.Description, contentDescription = "文档", tint = CandyText)
                     }

@@ -22,6 +22,8 @@ data class PluginManifest(
     val contributions: List<String> = emptyList(),
     /** 要求的最低 IDE 版本（不满足则不装载） */
     val minIdeVersion: String? = null,
+    /** 系统级插件（SfA/SfG/SfW 平台插件）：禁止停用/卸载/修改 */
+    val system: Boolean = false,
 ) {
     companion object {
         const val FILE_NAME = "candy-plugin.json"
@@ -41,6 +43,7 @@ data class PluginManifest(
                     (0 until a.length()).map { a.getString(it) }
                 }.getOrDefault(emptyList()),
                 minIdeVersion = o.optString("minIdeVersion").ifBlank { null },
+                system = o.optBoolean("system", false),
             )
         }
     }

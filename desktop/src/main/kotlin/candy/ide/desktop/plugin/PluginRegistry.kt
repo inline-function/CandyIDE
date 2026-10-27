@@ -8,7 +8,12 @@ import candy.ide.desktop.plugin.contrib.SettingsSectionContribution
 import sugared.functor.lsp.LspExtension
 
 /** 已装载的插件（清单 + 实例；instance 为 null 表示纯资产插件） */
-data class LoadedPlugin(val manifest: PluginManifest, val instance: CandyPlugin?)
+data class LoadedPlugin(
+    val manifest: PluginManifest,
+    val instance: CandyPlugin?,
+    /** 本轮装载即被停用（持久化状态命中）：不 setup，卡片显示「已停用」 */
+    val disabled: Boolean = false,
+)
 
 /**
  * 插件注册表（全局单例；对齐安卓端 candy.ide.plugin.PluginRegistry）：持有已装载插件与其贡献点。

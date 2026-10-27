@@ -567,6 +567,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun goSettings() { screen.value = Screen.Settings }
+    fun goPlugins() { screen.value = Screen.Plugins }
     fun goIdeLog() { ensureIdeLogLoaded(); screen.value = Screen.IdeLog }
     fun goProjectSettings(dir: CandyPath) {
         settingsProject.value = dir
@@ -1056,6 +1057,7 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
             // 编辑页长按进来的：工程还开着就回编辑页，否则回主页
             Screen.ProjectSettings -> if (currentProject.value != null) Screen.Editor else Screen.Projects
             Screen.IdeLog -> Screen.Settings
+            Screen.Plugins -> Screen.Projects
             Screen.Scheme -> Screen.Settings
             Screen.Developers -> Screen.Settings
             Screen.Settings -> if (currentProject.value != null) Screen.Editor else Screen.Projects

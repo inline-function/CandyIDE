@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Folder
@@ -69,6 +70,9 @@ fun ProjectsScreen(vm: CandyViewModel) {
             TopAppBar(
                 title = { CandyTitleWithEgg() },
                 actions = {
+                    IconButton(onClick = { vm.goPlugins() }) {
+                        Icon(Icons.Default.Extension, contentDescription = "插件", tint = CandyText)
+                    }
                     IconButton(onClick = { vm.screen.value = Screen.Terminal }) {
                         Icon(Icons.Default.Terminal, contentDescription = "终端", tint = CandyText)
                     }

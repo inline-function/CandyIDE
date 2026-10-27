@@ -1,0 +1,113 @@
+// core.math.number —— 数论定理族（整除 / gcd / 同余 / 素数）
+// 依赖：无新增；与 math.subl 并列同模块。
+//
+// 【设计说明（ZFC 同款分层，作 wiki 底稿）】
+//  整除、同余、gcd、素数在本命题层没有内建谓词（用 def 定义受两限：量词不入 def 体 +
+//  挂载不可见——实测，见 core/zfc/derived.subl 文末清单）。本族采用 **ZFC 式不透明谓词层**：
+//  以 divides<a, b> / cong<a, b, m> / isGcd<g, a, b> / isPrime<p> 为谓词符号（尖括号项式），
+//  定理在其上做结构推理；谓词语义锚点由使用方经 axiom 供给（x ∈ xs 的对偶：成员事实由
+//  用户提供）：
+//    divides<d, n> ⟺ ∃k . (n = d * k)
+//    cong<a, b, m> ⟺ ∃q . ((a - b) = q * m)
+//    isGcd<g, a, b> ⟺ divides<g,a> & divides<g,b> & (∀d . ((divides<d,a> & divides<d,b>) → divides<d,g>))
+//    isPrime<p> ⟺ (1 < p) & (∀d . (divides<d, p> → ((d = 1) ∨ (d = p))))
+//  原因：项级函数符号与量词 def 均不参与定理层推理（实测），不透明谓词层是唯一能让定理
+//  搜索与调用注入真正用起来的形态。
+// 【机制标注】原子形（NameRef 项）可搜索；BinExpr 项（a + c 等）调用注入。
+// 【P-3 自审】头名与 logic/classic/zfc/math/peano/order 零重叠；形态均含上述专有谓词。
+
+// 【调用注入的两条硬规则（实测）】
+//  ① 调用尖括号里的**项级参数必须用变量名**（`mono mul`<x, y, k>()），传字面量
+//    （`cong trans`<x, y, k, 3>()）不参与实例化——注入的后件里 m 保持自由，MP 不触发；
+//  ② 调用注入的定理后件与目标须**结构同一**（变量名、括号完全一致）——命题层不做
+//    算术求值，形态靠匹配。
+
+// ---------- 整除 ----------
+
+// 传递性：a|b & b|c ⟹ a|c。
+// 用法：axiom divides<d1, d2> / axiom divides<d2, d3> / `divides trans`<d1, d2, d3>()
+//       → ∴ divides<d1, d3>（已实测）。
+@theorem
+fun `divides trans`[a, b, c]: Null <((divides<a, b>) & (divides<b, c>)) → divides<a, c>>
+
+// 自反性：n|n。目标 ∴ divides<n, n> 直接命中（搜索）。
+@theorem
+fun `divides self`[n]: Null <divides<n, n>>
+
+// 1 整除一切：1|n。目标 ∴ divides<1, n> 直接命中。
+@theorem
+fun `divides one`[n]: Null <divides<1, n>>
+
+// 整除蕴涵不大于（n > 0 时）：d|n & 0 < d ⟹ d <= n。
+// 用途：因子上界夹逼（试除法的范围论证）。
+@theorem
+fun `divides le`[d, n]: Null <((divides<d, n>) & (0 < d)) → (d <= n)>
+
+// ---------- 最大公因数 ----------
+
+// gcd 是公因数：isGcd<g,a,b> ⟹ g|a 且 g|b。
+// 用法：axiom isGcd<2, 4, 6> → `isGcd divides`<2, 4, 6>() → ∴ (divides<2, 4> & divides<2, 6>)（已实测）。
+@theorem
+fun `isGcd divides`[g, a, b]: Null <isGcd<g, a, b> → ((divides<g, a>) & (divides<g, b>))>
+
+// gcd 是最大公因数：a、b 的任一公因数都整除 g。
+// 用途：把「整除 a 且整除 b」收口到「整除 gcd」——约分、互素判定。
+@theorem
+fun `isGcd greatest`[g, a, b, d]: Null <((isGcd<g, a, b>) & (divides<d, a>) & (divides<d, b>)) → divides<d, g>>
+
+// gcd 对称：gcd(a,b) 与 gcd(b,a) 同谓词成立。
+@theorem
+fun `isGcd comm`[g, a, b]: Null <isGcd<g, a, b> → isGcd<g, b, a>>
+
+// 贝祖定理（Nat 域形式）：g = gcd(a,b) ⟹ ∃s t . |a·s − b·t| = g（析取两支即绝对值）。
+// 注：项含 BinExpr 与 ∃——形态记录；带符号版本需 Int 与负系数，本层不给出。
+@theorem
+fun `bezout`[g, a, b]: Null <isGcd<g, a, b> → (∃s . ∃t . (((a * s) = ((b * t) + g)) ∨ ((b * t) = ((a * s) + g))))>
+
+// ---------- 同余（mod m） ----------
+
+// 自反性：a ≡ a (mod m)。目标 ∴ cong<a, a, m> 直接命中。
+@theorem
+fun `cong self`[a, m]: Null <cong<a, a, m>>
+
+// 对称性：a ≡ b (mod m) ⟹ b ≡ a (mod m)。
+@theorem
+fun `cong sym`[a, b, m]: Null <cong<a, b, m> → cong<b, a, m>>
+
+// 传递性：a ≡ b & b ≡ c (mod m) ⟹ a ≡ c (mod m)。
+// 用法：axiom cong<x, y, 3> / axiom cong<y, k, 3> / `cong trans`<x, y, k, 3>() → ∴ cong<x, k, 3>（已实测）。
+@theorem
+fun `cong trans`[a, b, c, m]: Null <((cong<a, b, m>) & (cong<b, c, m>)) → cong<a, c, m>>
+
+// 同余加法：a ≡ b & c ≡ d (mod m) ⟹ a + c ≡ b + d (mod m)。
+// 注：结论项含 BinExpr——调用注入形态（供给 cong<a,b,m> 与 cong<c,d,m> 两前提后使用）。
+@theorem
+fun `cong add`[a, b, c, d, m]: Null <((cong<a, b, m>) & (cong<c, d, m>)) → cong<a + c, b + d, m>>
+
+// 同余乘法：a ≡ b & c ≡ d (mod m) ⟹ a·c ≡ b·d (mod m)。
+@theorem
+fun `cong mul`[a, b, c, d, m]: Null <((cong<a, b, m>) & (cong<c, d, m>)) → cong<a * c, b * d, m>>
+
+// ---------- 素数 ----------
+
+// 素数大于 1：isPrime<p> ⟹ 1 < p。
+@theorem
+fun `prime gt one`[p]: Null <isPrime<p> → (1 < p)>
+
+// 素数的因子只有 1 与自身：isPrime<p> & d|p ⟹ (d = 1) ∨ (d = p)。
+// 用途：素性判定收口、因子枚举完备性。
+@theorem
+fun `prime divisors`[p, d]: Null <((isPrime<p>) & (divides<d, p>)) → ((d = 1) ∨ (d = p))>
+
+// 欧几里得引理：p 素 & p | a·b ⟹ p | a ∨ p | b。
+// 用法：axiom isPrime<p> / axiom divides<p, ((a * b))> 后调用注入，
+//       ∴ ((divides<p, a>) ∨ (divides<p, b>)) 命中注入事实。
+// 这是唯一因子定理的关键一步——数论链条的核心形态。
+@theorem
+fun `euclid lemma`[p, a, b]: Null <((isPrime<p>) & (divides<p, a * b>)) → ((divides<p, a>) ∨ (divides<p, b>))>
+
+// 费马小定理（Nat 域形式）：p 素 ⟹ ∃q . (a^p = q·p + a)，即 p | (a^p − a)。
+// 注：结论含 CallExpr（pow）与 ∃——pow 为值级函数（math 域），命题层项级函数符号不参与
+// 合一——仅作形态记录与调用注入（结论以整形使用）。
+@theorem
+fun `fermat little`[p, a]: Null <isPrime<p> → (∃q . ((pow(a, p)) = ((q * p) + a)))>

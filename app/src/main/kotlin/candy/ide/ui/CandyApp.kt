@@ -55,7 +55,7 @@ private fun NoPluginScreen() {
     }
 }
 
-enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource, Stdlib, Virt, Preview }
+enum class Screen { Projects, Editor, Settings, Scheme, ProjectSettings, IdeLog, Developers, Terminal, Agent, Git, ProjectLinks, OpenSource, Stdlib, Plugins, Virt, Preview }
 
 @Composable
 fun CandyApp(vm: CandyViewModel = viewModel()) {
@@ -339,6 +339,7 @@ fun CandyApp(vm: CandyViewModel = viewModel()) {
             ),
         )
         Screen.Stdlib -> StdlibViewerScreen(vm)
+        Screen.Plugins -> PluginScreen(vm)
     }
 
     // 全局安装反馈：等待框 / 成功「是否打开」/ 失败提示

@@ -11,7 +11,7 @@ import candy.ide.data.DiagItem
 import candy.ide.desktop.data.ProjectStore
 import java.io.File
 
-enum class DesktopScreen { Projects, Settings, Docs, Scheme, ProjectSettings, About, Stdlib, IdeLog, Agent }
+enum class DesktopScreen { Projects, Settings, Docs, Scheme, ProjectSettings, About, Stdlib, IdeLog, Plugins, Agent }
 
 /** 输出一行：终端式输出面板（stdout/stderr/信息/诊断四类着色） */
 data class OutputLine(val text: String, val kind: Kind = Kind.Out) {

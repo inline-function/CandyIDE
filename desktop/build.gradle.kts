@@ -80,6 +80,8 @@ val syncAndroidPluginAssets by tasks.registering(Sync::class) {
         include("android/stdlib/**", "android/procs/**")
     }
     into(candyPluginsGen.map { it.dir("android-project") })
+    // 该资产目录是 :plugin-android:copyProcs 的输出（stdlib/procs 写入插件资产），显式声明依赖避免隐式依赖校验失败
+    dependsOn(":plugin-android:copyProcs")
 }
 
 /**
@@ -167,7 +169,10 @@ compose.desktop {
         mainClass = "candy.ide.desktop.MainKt"
         nativeDistributions {
             // AppImage = 免安装目录（含 CandyIDE.exe），不依赖 WiX；MSI/EXE 安装包需本机装 WiX
-            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.AppImage)
+            targetFormats(
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.AppImage,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
+            )
             packageName = "CandyIDE"
             packageVersion = "1.0.0"
             description = "Sublimation（凝华）语言桌面 IDE"

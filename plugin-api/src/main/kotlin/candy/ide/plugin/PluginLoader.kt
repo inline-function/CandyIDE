@@ -12,10 +12,19 @@ import android.content.Context
 object PluginLoader {
 
     fun loadAll(context: Context, host: PluginHost, resolver: (String) -> CandyPlugin?): List<LoadedPlugin> {
+        PluginStateStore.ensure(context)
         val out = ArrayList<LoadedPlugin>()
         val dirs = runCatching { context.assets.list(PluginManifest.ASSET_ROOT) }.getOrNull() ?: emptyArray()
+        // 持久化的停用/卸载状态（系统插件不受停用约束；卸载=隐藏卡片）
+        val disabled = PluginStateStore.disabledIds().filterNot { SystemPlugins.isSystemId(it) }.toSet()
+        val uninstalled = PluginStateStore.uninstalledIds()
         for (id in dirs.sorted()) {
             val manifest = readManifest(context, id) ?: continue
+            if (id in uninstalled) continue            // 已「卸载」：不进列表（v1 隐藏）
+            if (id in disabled) {                        // 已停用：留卡片、不装配
+                out += LoadedPlugin(manifest, null, disabled = true)
+                continue
+            }
             val instance = runCatching { resolver(manifest.id) }.getOrNull()
             if (instance != null && instance.manifest.id != manifest.id) {
                 host.log("**[插件]** 装配跳过 " + manifest.id + "：清单 id 与实现不一致（" + instance.manifest.id + "）")

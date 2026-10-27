@@ -1,0 +1,108 @@
+// core.math.peano —— 皮亚诺公理（PA）+ 由 PA 派生的算术事实
+// 依赖：无新增；与 math.subl 并列同模块。
+//
+// 【PA 与本语言的关系（重要说明，作 wiki 底稿）】
+//  PA 的载体是自然数。本语言的 Nat 类型由内建层级给出（Nat/Int/Rat 一族），编译器为
+//  Nat 变量自动注入 n ≥ 0（D-NAT-PROP）与 n = 初值——即 PA 第 1 条「0 是自然数」与
+//  0 是最小自然数已由类型系统承担，不重复声明为定理。
+//  本文件给出 PA 的其余四条（后继存在、单射、0 非后继、归纳模式）及由它们派生的
+//  加法/乘法结构事实。后继记为值级表达式 n + 1（无独立 succ 函数符号——函数符号不参与
+//  定理合一与命题层项级推理，见文末机制注记）。
+// 【机制约束（实测）】
+//  · PA3/PA4/派生等式族：项含 BinExpr（n + 1、a + b）——**调用注入**可靠
+//    （`nat succ nonzero`<x>() 后 ∴ ¬((x + 1) = 0) 直接命中注入事实）；
+//    搜索不可靠（toString 兜底）；
+//  · PA5 归纳模式：@P 命题参数带项（P<n>），调用供给机制只支持 0 元命题——**归纳整形
+//    不可经调用注入**。可靠路径：
+//     (1) 同文件目标 ∴ ((P<0> & (∀n . (P<n> → P<n + 1>))) → (∀n . P<n>)) ——搜索按
+//         结构同一命中（跨文件因位置敏感受限）；
+//     (2) 通用路径（推荐写进 wiki）：以 axiom 供给整形 + 两前提，MP 一步推出——
+//         axiom ((S<0> & (∀n . (S<n> → S<n + 1>))) → (∀n . S<n>))
+//         axiom S<0>
+//         axiom (∀n . (S<n> → S<n + 1>))
+//         ∴ (∀n . S<n>)
+//         （已实测，模块检查通过）。
+// 【P-3 自审】全族头名（nat …/add …/mul …/succ …）与 logic/classic/zfc/math 既有声明零重叠。
+
+// 【调用注入的两条硬规则（实测）】
+//  ① 调用尖括号里的**项级参数必须用变量名**（`mono mul`<x, y, k>()），传字面量
+//    （`cong trans`<x, y, k, 3>()）不参与实例化——注入的后件里 m 保持自由，MP 不触发；
+//  ② 调用注入的定理后件与目标须**结构同一**（变量名、括号完全一致）——命题层不做
+//    算术求值，形态靠匹配。
+
+// ---------- PA 第 2 条：后继存在 ----------
+// 任意 n 有后继 n + 1。
+// 用途：需要「下一个数存在」的存在性目标（项含 BinExpr：调用注入）。
+@theorem
+fun `nat succ total`[n]: Null <∃m . ((n + 1) = m)>
+
+// ---------- PA 第 3 条：后继单射 ----------
+// n + 1 = m + 1 ⟹ n = m。
+// 用法：`nat succ injective`<x, y>() 后，整形目标 ∴ ((x + 1) = (y + 1)) → (x = y) 命中
+// （线性通道对本形亦自动可证——等式图 + 差分夹逼；本条作形态记录）。
+@theorem
+fun `nat succ injective`[n, m]: Null <((n + 1) = (m + 1)) → (n = m)>
+
+// ---------- PA 第 4 条：0 不是任何自然数的后继 ----------
+// 用法：`nat succ nonzero`<x>() 后 ∴ ¬((x + 1) = 0) 命中注入事实（已实测）。
+// 用途：排除 0 的前驱、无穷下降反驳。
+@theorem
+fun `nat succ nonzero`[n]: Null <¬((n + 1) = 0)>
+
+// ---------- PA 第 5 条：归纳公理模式 ----------
+// P(0) ∧ (∀n . P(n) ⟹ P(n + 1)) ⟹ ∀n . P(n)。
+// @P 为命题参数（一元谓词 P<…>）：见文件头机制约束——归纳整形不可调用注入，
+// 用法为同文件搜索命中或 axiom 供给 + MP（推荐写法见上文）。
+@theorem
+fun `nat induction`[@P]: Null <(P<0> & ∀n . (P<n> → P<n + 1>)) → ∀n . P<n>>
+
+// ---------- 派生事实：加法结构 ----------
+// 交换律：a + b = b + a。用法：`add comm`<x, y>() → ∴ (x + y) = (y + x)（已实测）。
+@theorem
+fun `add comm`[a, b]: Null <(a + b) = (b + a)>
+
+// 结合律：(a + b) + c = a + (b + c)。
+@theorem
+fun `add assoc`[a, b, c]: Null <((a + b) + c) = (a + (b + c))>
+
+// 左单位元 / 右单位元：0 + a = a / a + 0 = a。
+@theorem
+fun `add zero left`[a]: Null <(0 + a) = a>
+@theorem
+fun `add zero right`[a]: Null <(a + 0) = a>
+
+// 加法消去律：a + b = a + c ⟹ b = c。
+// 注：等式结论的 MP 支撑弱（饱和对 = 结论不注入）——以整形目标或通道（差分夹逼）使用。
+@theorem
+fun `add cancel`[a, b, c]: Null <((a + b) = (a + c)) → (b = c)>
+
+// ---------- 派生事实：乘法结构 ----------
+// 交换律：a * b = b * a。用法：`mul comm`<x, y>() → ∴ (x * y) = (y * x)。
+@theorem
+fun `mul comm`[a, b]: Null <(a * b) = (b * a)>
+
+// 结合律：(a * b) * c = a * (b * c)。
+@theorem
+fun `mul assoc`[a, b, c]: Null <((a * b) * c) = (a * (b * c))>
+
+// 左单位元 / 右单位元：1 * a = a / a * 1 = a。
+@theorem
+fun `mul one left`[a]: Null <(1 * a) = a>
+@theorem
+fun `mul one right`[a]: Null <(a * 1) = a>
+
+// 零化律：0 * a = 0 / a * 0 = 0。
+@theorem
+fun `mul zero left`[a]: Null <(0 * a) = 0>
+@theorem
+fun `mul zero right`[a]: Null <(a * 0) = 0>
+
+// 乘法消去律（a ≠ 0）：a * b = a * c ⟹ b = c。
+// 注：非线性 + 等式结论——通道与 MP 双不靠；仅作形态与调用注入记录（结论以整形目标使用）。
+@theorem
+fun `mul cancel`[a, b, c]: Null <((¬(a = 0)) & ((a * b) = (a * c))) → (b = c)>
+
+// ---------- 派生事实：1 的位置 ----------
+// 0 < 1（严格序基线）。
+@theorem
+fun `nat one positive`(): Null <(0 < 1)>

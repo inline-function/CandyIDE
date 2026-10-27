@@ -41,6 +41,7 @@ fun CandyDesktopApp(state: IdeState) {
             DesktopScreen.About -> AboutScreen(state)
             DesktopScreen.Stdlib -> StdlibViewerScreen(state)
             DesktopScreen.IdeLog -> IdeLogScreen(state)
+            DesktopScreen.Plugins -> PluginScreen(state)
             DesktopScreen.Agent -> AgentScreen(
                 state = state,
                 agent = agent,

@@ -1,0 +1,26 @@
+// core.math.inequality —— 经典不等式定理族（形式化）
+// 依赖：无新增；与 math.subl 并列同模块。
+//
+// 【机制约束（实测）】
+//  · 本族结论项多为 BinExpr（4·a·b、(a+b)² 等）——搜索不可靠（toString 兜底），
+//    可靠路径是**调用注入**：`amgm sq`<a, b>() 注入后 ∴ 目标匹配注入事实；
+//  · 三角不等式需绝对值（|x|）/符号函数——本层无 abs 谓词与函数符号入命题，
+//    **不直写**（同笛卡尔积理由：不硬凑）。等价平方形态与分情况拆分留给用户侧
+//    when[p ∨ q] 分类讨论处理。
+// 【P-3 自审】头名与既有族零重叠。
+
+// AM-GM（两数，平方形态、免 sqrt）：4ab ≤ (a + b)²。
+// 用法：`amgm sq`<a, b>() → ∴ ((4 * a) * b) <= ((a + b) * (a + b))。
+// (sqrt(a*b) ≤ (a+b)/2 的平方等价；sqrt 为 CallExpr 不入合一，故取平方形态。)
+@theorem
+fun `amgm sq`[a, b]: Null <((4 * a * b) <= ((a + b) * (a + b)))>
+
+// 伯努利不等式（Nat 域、x ≥ 0 自动成立）：pow(1 + x, n) ≥ 1 + n·x。
+// 注：pow 为值级函数——结论含 CallExpr，仅作形态记录与调用注入。
+@theorem
+fun `bernoulli`[n, x]: Null <((pow((1 + x), n)) >= ((n * x) + 1))>
+
+// 算术-几何均值链（三数降幂）：a² + b² ≥ 2ab（AM-GM 的二项直接形态）。
+// 用法：`two square`<a, b>() → ∴ ((a * a) + (b * b)) >= (2 * a * b)。
+@theorem
+fun `two square`[a, b]: Null <((a * a) + (b * b)) >= (2 * a * b)>
