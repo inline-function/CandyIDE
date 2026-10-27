@@ -89,6 +89,16 @@ fun SettingsScreen(vm: CandyViewModel) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    // Termux 安装/授权状态：两条 PackageManager IPC，只随 resumeTick 刷新
+    // （原为组合内每次调用，滑动经过该区域时每帧 IPC）
+    val termuxStatus = remember(resumeTick) {
+        candy.ide.terminal.TerminalBridge.isTermuxInstalled(ctx) to
+            candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx)
+    }
+    val termuxInstalled = termuxStatus.first
+    val termuxGranted = termuxStatus.second
+    // 导入字体后让字体列表重算（否则 remember 缓存看不到新字体）
+    var fontsVersion by remember { mutableStateOf(0) }
     var pendingTermuxForGit by remember { mutableStateOf(false) }
     var pendingInstallGit by remember { mutableStateOf(false) }
     var termuxJustInstalled by remember { mutableStateOf(false) }
@@ -132,9 +142,10 @@ fun SettingsScreen(vm: CandyViewModel) {
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
             item { SectionTitle("编辑器") }
-            item {
+            item(key = "font-picker") {
                 var fontMenu by remember { mutableStateOf(false) }
-                val fonts = FontManager.listAll(ctx)
+                val fonts = remember(fontsVersion) { FontManager.listAll(ctx) }
+                candy.ide.ui.PerfLog.Count("font-picker")
                 Surface(color = CandySurface, onClick = { fontMenu = true }) {
                     Row(
                         Modifier.fillMaxWidth().padding(16.dp),
@@ -180,7 +191,7 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
-            item {
+            item(key = "scheme-picker") {
                 Surface(color = CandySurface, onClick = { schemeMenu = true }) {
                     Row(
                         Modifier.fillMaxWidth().padding(16.dp),
@@ -190,7 +201,9 @@ fun SettingsScreen(vm: CandyViewModel) {
                         Box {
                             Text(Schemes.current.name, color = CandyTextDim)
                             DropdownMenu(expanded = schemeMenu, onDismissRequest = { schemeMenu = false }) {
-                                vm.schemeIds().forEach { (id, name) ->
+                                val schemeIds = remember { vm.schemeIds() }
+                                candy.ide.ui.PerfLog.Count("scheme-picker")
+                                schemeIds.forEach { (id, name) ->
                                     DropdownMenuItem(
                                         text = { Text(name) },
                                         onClick = {
@@ -220,7 +233,11 @@ fun SettingsScreen(vm: CandyViewModel) {
                     Text("字号", color = CandyText, modifier = Modifier.width(64.dp))
                     Slider(
                         value = Settings.fontSize.toFloat(),
-                        onValueChange = { vm.setFontSize(it.toInt()) },
+                        onValueChange = { v ->
+                            // 只在跨整数刻度时写 Settings + 落盘（原本每个 tick 都写盘，约 60 次/秒）
+                            val n2 = v.toInt()
+                            if (n2 != Settings.fontSize) vm.setFontSize(n2)
+                        },
                         valueRange = 10f..30f,
                         modifier = Modifier.weight(1f)
                     )
@@ -323,7 +340,8 @@ fun SettingsScreen(vm: CandyViewModel) {
                 }
             }
             // Termux RUN_COMMAND 授权（Shizuku 分类下，git/终端能力都依赖它）
-            item {
+            item(key = "termux-grant") {
+                candy.ide.ui.PerfLog.Count("termux-grant")
                 Surface(color = CandySurface) {
                     Row(
                         Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically
@@ -332,17 +350,15 @@ fun SettingsScreen(vm: CandyViewModel) {
                             Text("Termux 授权", color = CandyText)
                             Spacer(Modifier.size(2.dp))
                             Text(
-                                if (!candy.ide.terminal.TerminalBridge.isTermuxInstalled(ctx))
+                                if (!termuxInstalled)
                                     "Termux 未安装（设置 → 伴生软件 下载）"
-                                else if (candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx))
+                                else if (termuxGranted)
                                     "已授权 RUN_COMMAND ✓"
                                 else "未授权 —— git 与终端的 Termux 通道需要它",
                                 color = CandyTextDim, style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        if (candy.ide.terminal.TerminalBridge.isTermuxInstalled(ctx) &&
-                            !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx)
-                        ) {
+                        if (termuxInstalled && !termuxGranted) {
                             TextButton(onClick = {
                                 runCmdPermLauncher.launch(arrayOf("com.termux.permission.RUN_COMMAND"))
                             }) { Text("请求授权") }
@@ -484,7 +500,8 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
-            item {
+            item(key = "agent-endpoint") {
+                candy.ide.ui.PerfLog.Count("agent-endpoint")
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     OutlinedTextField(
                         value = agentUri,
@@ -510,7 +527,11 @@ fun SettingsScreen(vm: CandyViewModel) {
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.size(8.dp))
+                }
+            }
+            item(key = "agent-temp") {
+                candy.ide.ui.PerfLog.Count("agent-temp")
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp)) {
                     // 采样温度：0~2 拖动条
                     var agentTemp by remember { mutableStateOf(Settings.agentTemperature) }
                     Column(Modifier.fillMaxWidth()) {
@@ -530,7 +551,11 @@ fun SettingsScreen(vm: CandyViewModel) {
                             steps = 19,
                         )
                     }
-                    Spacer(Modifier.size(8.dp))
+                }
+            }
+            item(key = "agent-stream") {
+                candy.ide.ui.PerfLog.Count("agent-stream")
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp)) {
                     // 流式输出：可选项
                     var agentStream by remember { mutableStateOf(Settings.agentStream) }
                     var streamExpanded by remember { mutableStateOf(false) }
@@ -568,7 +593,11 @@ fun SettingsScreen(vm: CandyViewModel) {
                             )
                         }
                     }
-                    Spacer(Modifier.size(8.dp))
+                }
+            }
+            item(key = "agent-prompt") {
+                candy.ide.ui.PerfLog.Count("agent-prompt")
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp)) {
                     var agentPrompt by remember { mutableStateOf(Settings.agentPrompt) }
                     OutlinedTextField(
                         value = agentPrompt,
@@ -577,7 +606,11 @@ fun SettingsScreen(vm: CandyViewModel) {
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
                     )
-                    Spacer(Modifier.size(8.dp))
+                }
+            }
+            item(key = "agent-a11y") {
+                candy.ide.ui.PerfLog.Count("agent-a11y")
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp)) {
                     // 无障碍权限：agent 后续操作 IDE 界面要用
                     var a11yOn by remember { mutableStateOf(isAccessibilityEnabled(ctx)) }
                     // 从系统设置返回时刷新开关状态
@@ -763,12 +796,13 @@ fun SettingsScreen(vm: CandyViewModel) {
                     }
                 }
             }
-            item {
+            item(key = "git-install") {
+                candy.ide.ui.PerfLog.Count("git-install")
                 Surface(color = CandySurface, onClick = {
                     when {
                         vm.gitReady.value -> Toast.makeText(ctx, "您已安装git", Toast.LENGTH_SHORT).show()
                         !vm.termuxInstalled.value -> pendingTermuxForGit = true
-                        !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx) -> {
+                        !termuxGranted -> {
                             // 没授权：提示去「Shizuku 权限」分类请求 Termux 授权
                             Toast.makeText(ctx, "请先请求 Termux 授权（设置 → Shizuku 权限 → Termux 授权），授权后再装 git", Toast.LENGTH_LONG).show()
                         }
@@ -785,7 +819,7 @@ fun SettingsScreen(vm: CandyViewModel) {
                                 when {
                                     vm.gitReady.value -> "已安装 ✓"
                                     !vm.termuxInstalled.value -> "需要先安装 Termux"
-                                    !candy.ide.terminal.TerminalBridge.hasRunCommandGrant(ctx) ->
+                                    !termuxGranted ->
                                         "需要先请求 Termux 授权（本页 Shizuku 分类里）"
                                     !vm.runCmdReady.value ->
                                         "已授权 ✓，但 Termux 未在运行或未允许外部调用（点击重试，或先打开 Termux 一次）"
