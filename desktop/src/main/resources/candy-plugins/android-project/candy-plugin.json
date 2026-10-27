@@ -8,7 +8,6 @@
   "contributions": [
     "project-type:jsapk",
     "editor-view:compose-preview",
-    "lsp-extension:android-stdlib",
     "project-settings-section:jsapk-info"
   ],
   "minIdeVersion": "2.0.0"

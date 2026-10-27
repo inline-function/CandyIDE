@@ -1,0 +1,13 @@
+{
+  "id": "sublimation-android",
+  "name": "SfA · 安卓运行时",
+  "version": "1.0.0",
+  "description": "Sublimation for Android：安卓运行时把 @android 内建与安卓标准库注入语言服务；jsapk 工程的编辑期补全/诊断/预览由本插件的 LSP 扩展提供",
+  "author": "Sublimation",
+  "entryClass": "candy.ide.desktop.plugin.platform.SublimationAndroidPlugin",
+  "contributions": [
+    "lsp-extension:android-stdlib"
+  ],
+  "system": true,
+  "minIdeVersion": "2.0.0"
+}

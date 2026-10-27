@@ -37,20 +37,26 @@ desktop/src/main/kotlin/candy/ide/desktop/plugin/   ← 插件 SDK（桌面版�
     ├─ CandyPlugin / PluginManifest / PluginHost / PluginLoader / PluginRegistry
     ├─ contrib/（6 类贡献点：工程类型 / 编辑器视图 / LSP 扩展 / 设置分区 / 工程设置分区 / 安装通道）
     ├─ preview/（ComposePreviewState + PreviewCodeGen 预览模型）
-    └─ android/（内置插件 android-project 的 Windows 端裁剪版）
-desktop/src/main/resources/candy-plugins/android-project/  ← 清单；stdlib/procs 资产构建期自 :plugin-android 同源同步
+    ├─ android/（内置插件 android-project 的 Windows 端裁剪版）
+    └─ platform/（三平台系统插件 SfA/SfG/SfW，t50 对齐）
+desktop/src/main/resources/candy-plugins/  ← 清单（android-project + sublimation-android/game/wasm）；
+    android/stdlib、android/procs 资产构建期自 :plugin-android 同源同步
 ```
 
-- **装载**：启动时后台线程跑 `PluginBootstrap.load`（对齐安卓端 VM.bootstrap）：读 `plugin-index.txt` → 各插件清单 → `BuiltInPluginIndex` 绑定实现 → IO 线程 `setup`（注册贡献点 / 物化资产到 `%APPDATA%\CandyIDE\plugins\<id>`，版本标记 4）。单个插件装配失败只记日志，不阻断 IDE。
+- **装载**：启动时后台线程跑 `PluginBootstrap.load`（对齐安卓端 VM.bootstrap）：读 `plugin-index.txt` → 各插件清单 → `BuiltInPluginIndex` 绑定实现 → IO 线程 `setup`（注册贡献点 / 物化资产到 `%APPDATA%\CandyIDE\plugins\<id>`，版本标记 4）。单个插件装配失败只记日志，不阻断 IDE。装载完成后把当前工程类型再通知一遍插件（装载晚于 openProject 的时序补位，t50 对齐）。
 - **贡献点**：与安卓端同构的 6 类注册表；UI 侧的渲染/路由位置与安卓端对齐——
   - `ProjectStore.typeOf` 先读标记（含插件类型）、无标记问插件 `claimsProject`；
   - 「运行」对插件工程类型路由 `runShort`（Ctrl+R / 顶栏按钮同）；
   - 布局预览面板由 `PluginRegistry.editorView()` 提供（Ctrl+Shift+P，容器为编辑器右侧栏）；
   - 设置页 / 工程设置页渲染插件分区（按 `sortKey`，`appliesTo` 过滤）；
-  - LSP 扩展在 `DesktopEngine.lsp` 惰性初始化与插件装载完成时注册（t14 契约，`isEnabled()` 实时生效）。
+  - LSP 扩展经 `registerLspExtension` 直达已创建的 `LspAnalysis`（与首轮分析时序解耦，t50 对齐），惰性初始化与装载完成时再全量补注册（t14 契约，`isEnabled()` 实时生效）。
+- **三平台系统插件（t50 对齐，插件中心可见带「系统插件」徽章，不可停用/卸载）**：
+  - `sublimation-android`（SfA · 安卓运行时，system）：接管 `lsp-extension:android-stdlib`——物化 android-project 的 stdlib/procs 资产后注册 `android-stdlib` 扩展，jsapk 工程打开时启用（工程类型通知），为编辑期补全/诊断注入 `@android` 内建与安卓标准库；
+  - `sublimation-game`（SfG · 游戏库，system）：`lsp-extension:sublimation-game` 实体占位（stdlib/procs 为 null，符号库构建中）；
+  - `sublimation-wasm`（SfW · WASM 运行时，system）：`lsp-extension:sublimation-wasm` 实体占位（同上）。
 - **android-project 插件（Windows 端裁剪版）**：
-  - 保留：`project-type:jsapk`（scaffold/认领/运行）、`lsp-extension:android-stdlib`（`@android`/`@composable` 编辑期诊断与补全，资产版本 4）、`editor-view:compose-preview`、`project-settings-section:jsapk-info`（jsapk 工程设置页的「APK 打包为安卓端专属能力」说明）。
-  - 裁剪：`app-installer:shizuku`（Windows 无 Shizuku）、`settings-section:litea-sdk`（LiteASDK 端上工具链为安卓打包链专用）、`project-settings-section:jsapk` 的打包配置（桌面不做打包）。
+  - 保留：`project-type:jsapk`（scaffold/认领/运行）、`editor-view:compose-preview`、`project-settings-section:jsapk-info`（jsapk 工程设置页的「APK 打包为安卓端专属能力」说明）。
+  - 裁剪：`lsp-extension:android-stdlib`（移交 SfA 单一来源注册）、`app-installer:shizuku`（Windows 无 Shizuku）、`settings-section:litea-sdk`（LiteASDK 端上工具链为安卓打包链专用）、`project-settings-section:jsapk` 的打包配置（桌面不做打包）。
 - **与安卓端的差异**（照抄基线的平台特化）：
 
 | 项 | 安卓端 | 桌面端 |
@@ -62,6 +68,8 @@ desktop/src/main/resources/candy-plugins/android-project/  ← 清单；stdlib/p
 | 编辑器视图容器 | 悬浮面板 + Virt 全屏 + 预览构建器三入口 | 编辑器右侧栏单面板（三入口合并） |
 | 多窗口 LSP 扩展启停 | 单工程时生效 | 启停跟随最近打开的工程（单例分析器共享，单窗口与安卓端一致） |
 | 安装通道 AppInstaller | Shizuku 静默安装 | 不提供（接口保留对齐，无注册） |
+| 插件资产路径契约 | `assetRoot` = assets 根下全路径（`candy-plugins/<id>/android`） | 同契约（`AndroidAssets.ASSET_PATH`），宿主物化时规范化掉前缀，落盘仍 `plugins/<id>/android`（保持旧标记有效） |
+| 资产路径守卫 | `:plugin-android:verifyPluginAssets`（preBuild） | `:desktop:verifyPluginAssets`（processResources 前，含 src 树与同步树双检查） |
 
 ## 功能对齐（v1.1）
 

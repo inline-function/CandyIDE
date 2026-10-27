@@ -131,8 +131,37 @@ sourceSets {
     }
 }
 
+/**
+ * 插件资产路径守卫（对齐安卓端 plugin-android:verifyPluginAssets，t50 修复后的回归网）：
+ * 插件代码引用的资产路径必须真实存在于资源树（手写 src 树或 syncAndroidPluginAssets 同步树），
+ * 防止「资产搬家但常量没跟上」式断链（AndroidAssets.ASSET_PATH 曾因此失效导致整个 setup 抛异常、
+ * 全部贡献未注册）。
+ */
+val verifyPluginAssets by tasks.registering {
+    val srcRoot = layout.projectDirectory.dir("src/main/resources/candy-plugins")
+    val genRoot = candyPluginsGen
+    dependsOn(syncAndroidPluginAssets)
+    doLast {
+        val required = listOf(
+            "android-project/candy-plugin.json",
+            "android-project/android/stdlib",
+            "android-project/android/procs",
+            "sublimation-android/candy-plugin.json",
+            "sublimation-game/candy-plugin.json",
+            "sublimation-wasm/candy-plugin.json",
+        )
+        val s = srcRoot.asFile
+        val g = genRoot.get().asFile
+        val missing = required.filter { rel -> !File(s, rel).exists() && !File(g, rel).exists() }
+        require(missing.isEmpty()) { "插件资产缺失/路径错位：\n" + missing.joinToString("\n") }
+    }
+}
+
 tasks.configureEach {
-    if (name == "processResources") dependsOn(genPluginIndex)
+    if (name == "processResources") {
+        dependsOn(genPluginIndex)
+        dependsOn(verifyPluginAssets)
+    }
 }
 
 dependencies {

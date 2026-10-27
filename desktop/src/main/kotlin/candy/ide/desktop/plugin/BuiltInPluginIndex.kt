@@ -1,6 +1,9 @@
 package candy.ide.desktop.plugin
 
 import candy.ide.desktop.plugin.android.DesktopAndroidProjectPlugin
+import candy.ide.desktop.plugin.platform.SublimationAndroidPlugin
+import candy.ide.desktop.plugin.platform.SublimationGamePlugin
+import candy.ide.desktop.plugin.platform.SublimationWasmPlugin
 
 /**
  * 内置插件索引（v1 加载机制；对齐安卓端 candy.ide.plugin.BuiltInPluginIndex）：
@@ -14,6 +17,10 @@ object BuiltInPluginIndex {
 
     val entries: Map<String, () -> CandyPlugin> = mapOf(
         "android-project" to { DesktopAndroidProjectPlugin() },
+        // 平台插件（系统级：SfA/SfG/SfW 实体，语言服务扩展提供方）
+        "sublimation-android" to { SublimationAndroidPlugin() },
+        "sublimation-game" to { SublimationGamePlugin() },
+        "sublimation-wasm" to { SublimationWasmPlugin() },
     )
 
     fun resolve(id: String): CandyPlugin? = entries[id]?.invoke()

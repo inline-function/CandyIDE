@@ -9,6 +9,7 @@ import sugared.functor.lsp.CompletionItem
 import sugared.functor.lsp.Diagnostic
 import sugared.functor.lsp.DiagnosticSeverity
 import sugared.functor.lsp.LspAnalysis
+import sugared.functor.lsp.LspExtension
 import sugared.functor.lsp.Position
 import java.io.File
 import java.nio.file.Files
@@ -65,9 +66,14 @@ object DesktopEngine {
         }
 
     /** 插件装载完成后补注册扩展：lsp 已初始化时注册新增扩展；未初始化时惰性初始化自取注册表 */
-    fun syncLspExtensions() {
+    fun syncLspExtensions() = synchronized(lspLock) {
         val a = lspInstance ?: return
         PluginRegistry.lspExtensions().forEach { ext -> runCatching { a.registerExtension(ext) } }
+    }
+
+    /** 插件注册语言服务扩展时直达已创建的 LspAnalysis（注册晚于首轮分析时补位；t50 对齐） */
+    internal fun registerLiveLspExtension(extension: LspExtension) = synchronized(lspLock) {
+        runCatching { lspInstance?.registerExtension(extension) }
     }
 
     /** 编译指定文件所属工程为 JS（插件经 PluginHost.compileToJs 调用；失败抛异常） */
