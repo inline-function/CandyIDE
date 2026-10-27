@@ -1,3 +1,4 @@
+import java.io.File
 plugins {
     id("com.android.library") version "8.7.3"
     id("org.jetbrains.kotlin.android") version "2.1.20"
@@ -54,6 +55,33 @@ val copyProcs by tasks.registering(Copy::class) {
     into(layout.projectDirectory.dir("src/main/assets/candy-plugins/android-project/android/procs"))
 }
 
-tasks.configureEach {
-    if (name == "preBuild") dependsOn(copyProcs)
+
+// 资产路径守卫（t50 修复后的回归网）：插件代码引用的资产路径必须真实存在于 assets 树，
+// 防止「资产搬家但常量没跟上」式断链（AndroidAssets.ASSET_PATH 曾因此失效导致整个 setup 抛异常）。
+// 资产树根（配置期解析一次）
+val pluginAssetsRoot: File = file("src/main/assets/candy-plugins")
+
+// 资产路径守卫（t50 修复后的回归网）：插件代码引用的资产路径必须真实存在于 assets 树，
+// 防止「资产搬家但常量没跟上」式断链（AndroidAssets 路径前缀缺失曾导致整个 setup 抛异常、全部贡献未注册）。
+val verifyPluginAssets by tasks.registering {
+    doLast {
+        val required = listOf(
+            "android-project/candy-plugin.json",
+            "android-project/android/stdlib",
+            "android-project/android/procs",
+            "sublimation-android/candy-plugin.json",
+            "sublimation-game/candy-plugin.json",
+            "sublimation-wasm/candy-plugin.json",
+        )
+        val missing = required.filter { rel -> !File(pluginAssetsRoot, rel).exists() }
+        require(missing.isEmpty()) { "插件资产缺失/路径错位：\n" + missing.joinToString("\n") }
+    }
 }
+
+tasks.configureEach {
+    if (name == "preBuild") {
+        dependsOn(copyProcs)
+        dependsOn(verifyPluginAssets)
+    }
+}
+

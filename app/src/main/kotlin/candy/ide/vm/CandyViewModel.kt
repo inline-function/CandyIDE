@@ -184,6 +184,11 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrNull().also { lsp = it }
     }
 
+    /** 插件注册语言服务扩展时直达已创建的 LspAnalysis（注册晚于首轮分析时补位） */
+    internal fun registerLiveLspExtension(extension: sugared.functor.lsp.LspExtension) = synchronized(lspLock) {
+        lsp?.registerExtension(extension)
+    }
+
     /** 编辑器每跑完一轮 Lexer 就把最新正文送进来：同步文档并刷新诊断。 */
     /** 分析器回调：同步给 LSP，并返回 semanticTokens 供编辑器着色 */
     fun onAnalyzed(text: String): List<Int>? {
@@ -250,6 +255,14 @@ class CandyViewModel(app: Application) : AndroidViewModel(app) {
                 Engine.bootstrap(getApplication())
                 // 插件框架：扫描 assets/candy-plugins/* 装载并 setup（内置插件经 BuiltInPluginIndex 绑定）
                 PluginLoader.loadAll(getApplication(), pluginHost, BuiltInPluginIndex::resolve)
+                // 插件晚于 openProject 完成装载时补位：把当前工程类型再通知一遍
+                // （否则 SfA 的 android-stdlib 扩展enabled 保持 false，补全缺安卓函数）
+                currentProject.value?.let { cur ->
+                    val curType = ProjectStore.typeOf(cur)
+                    runCatching {
+                        PluginRegistry.plugins.forEach { it.instance?.onProjectTypeChanged(curType, cur) }
+                    }
+                }
                 Settings.attach(getApplication())
                 candy.ide.git.GitManager.appCtx = getApplication()
                 schemeVersion.intValue++

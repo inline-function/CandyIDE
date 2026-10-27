@@ -100,6 +100,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM 单元测试（插件→语言服务通路回归，t50）
+    testImplementation("junit:junit:4.13.2")
 }
 
 // 把 sublimation/core 标准库同步进 assets/stdlib（首启拷到应用私有目录供解释器加载）

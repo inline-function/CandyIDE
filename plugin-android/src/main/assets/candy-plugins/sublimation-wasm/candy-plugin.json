@@ -1,0 +1,13 @@
+{
+  "id": "sublimation-wasm",
+  "name": "SfW · WASM 运行时",
+  "version": "0.1.0",
+  "description": "Sublimation for WASM：wasm 编译目标运行时；语言服务扩展实体已注册，符号库构建中",
+  "author": "Sublimation",
+  "entryClass": "candy.plugin.android.platform.SublimationWasmPlugin",
+  "contributions": [
+    "lsp-extension:sublimation-wasm"
+  ],
+  "system": true,
+  "minIdeVersion": "2.0.0"
+}

@@ -53,7 +53,11 @@ class CandyPluginHost(private val vm: CandyViewModel) : PluginHost {
 
     override fun registerProjectType(contrib: ProjectTypeContribution) = PluginRegistry.registerProjectType(contrib)
     override fun registerEditorView(contrib: EditorViewContribution) = PluginRegistry.registerEditorView(contrib)
-    override fun registerLspExtension(extension: LspExtension) = PluginRegistry.registerLspExtension(extension)
+    override fun registerLspExtension(extension: LspExtension) {
+        PluginRegistry.registerLspExtension(extension)
+        // 与 LspAnalysis 创建时序解耦：插件晚于首轮分析注册时直达实时分析器
+        vm.registerLiveLspExtension(extension)
+    }
     override fun registerSettingsSection(contrib: SettingsSectionContribution) = PluginRegistry.registerSettingsSection(contrib)
     override fun registerProjectSettingsSection(contrib: ProjectSettingsSectionContribution) = PluginRegistry.registerProjectSettingsSection(contrib)
     override fun registerAppInstaller(installer: AppInstaller) = PluginRegistry.registerAppInstaller(installer)

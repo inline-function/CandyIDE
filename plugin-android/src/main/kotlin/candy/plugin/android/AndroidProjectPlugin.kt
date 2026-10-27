@@ -5,7 +5,6 @@ import candy.ide.plugin.PluginHost
 import candy.ide.plugin.PluginManifest
 import candy.plugin.android.install.ShizukuInstaller
 import candy.plugin.android.litea.LiteASdk
-import candy.plugin.android.lsp.AndroidLspExtension
 import candy.plugin.android.project.AndroidProjectType
 import candy.plugin.android.project.AndroidPackaging
 import candy.plugin.android.ui.AndroidEditorView
@@ -16,7 +15,6 @@ import candy.plugin.android.ui.LiteaSdkSection
  * android-project 插件：CandyIDE 的内置安卓工程支持（自 :app 拆出）。
  * 提供贡献点：
  *  - project-type:jsapk（TYPE_JSAPK 工程类型 + 打包链路）
- *  - lsp-extension:android-stdlib（@android 内建与处理器脚本的编辑期支持）
  *  - editor-view:compose-preview（布局预览三件套）
  *  - settings-section:litea-sdk（LiteASDK 工具链导入）
  *  - project-settings-section:jsapk（jsapk.json 打包配置）
@@ -35,14 +33,11 @@ class AndroidProjectPlugin : CandyPlugin {
         contributions = listOf(
             "project-type:jsapk",
             "editor-view:compose-preview",
-            "lsp-extension:android-stdlib",
-            "settings-section:litea-sdk",
+                "settings-section:litea-sdk",
             "project-settings-section:jsapk",
             "app-installer:shizuku",
         ),
     )
-
-    private var lspExtension: AndroidLspExtension? = null
 
     override fun setup(host: PluginHost) {
         // 1) 物化插件资产（android/stdlib + android/procs），版本 4 与旧 androidBootstrap 对齐
@@ -50,12 +45,7 @@ class AndroidProjectPlugin : CandyPlugin {
         val stdlib = AndroidAssets.stdlib()
         val procs = AndroidAssets.procs()
 
-        // 2) 语言服务扩展：目录已固定，启停按工程类型实时切换
-        val ext = AndroidLspExtension(stdlib, procs)
-        lspExtension = ext
-        host.registerLspExtension(ext)
-
-        // 3) 贡献点
+        // 2) 贡献点（语言服务扩展由 SfA 平台插件提供，共用同一物化资产）
         host.registerProjectType(AndroidProjectType())
         host.registerEditorView(AndroidEditorView())
         host.registerSettingsSection(LiteaSdkSection())
@@ -63,8 +53,4 @@ class AndroidProjectPlugin : CandyPlugin {
         host.registerAppInstaller(ShizukuInstaller())
     }
 
-    override fun onProjectTypeChanged(typeId: String, dir: candy.ide.fs.CandyPath?) {
-        // 安卓工程才启用 android stdlib/procs 的 LSP 接入（同旧 setAndroidStdlibEnabled）
-        lspExtension?.enabled = typeId == AndroidProjectType.TYPE_ID
-    }
 }

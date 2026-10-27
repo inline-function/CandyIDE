@@ -16,8 +16,11 @@ object AndroidAssets {
     lateinit var root: File
         private set
 
+    /** 插件资产内的安卓运行时目录（assets 根下的全路径，t15 后插件资产统一在 candy-plugins/<id>/ 下） */
+    const val ASSET_PATH = "candy-plugins/" + PLUGIN_ID + "/android"
+
     fun setup(host: PluginHost) {
-        root = host.materializeAssets(PLUGIN_ID, "android", VERSION)
+        root = host.materializeAssets(PLUGIN_ID, ASSET_PATH, VERSION)
     }
 
     fun stdlib(): File = File(root, "stdlib")

@@ -8,7 +8,6 @@
   "contributions": [
     "project-type:jsapk",
     "editor-view:compose-preview",
-    "lsp-extension:android-stdlib",
     "settings-section:litea-sdk",
     "project-settings-section:jsapk",
     "app-installer:shizuku"

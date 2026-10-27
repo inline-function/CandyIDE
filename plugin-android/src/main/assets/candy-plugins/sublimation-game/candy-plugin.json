@@ -1,0 +1,13 @@
+{
+  "id": "sublimation-game",
+  "name": "SfG · 游戏库",
+  "version": "0.1.0",
+  "description": "Sublimation for Games：KAPLAY 风格游戏库运行时；语言服务扩展实体已注册，游戏符号库构建中",
+  "author": "Sublimation",
+  "entryClass": "candy.plugin.android.platform.SublimationGamePlugin",
+  "contributions": [
+    "lsp-extension:sublimation-game"
+  ],
+  "system": true,
+  "minIdeVersion": "2.0.0"
+}
